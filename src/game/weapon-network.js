@@ -1,6 +1,7 @@
 const ROWS = 5;
 const MAX_COLUMNS = 5;
 const INITIAL_UPGRADE_COST = 100;
+const MAX_SPECIAL_MULTIPLIER = 1.6;
 
 export const SPECIAL_UPGRADE_CARDS = [
   {
@@ -25,7 +26,7 @@ export const SPECIAL_UPGRADE_CARDS = [
     id: "empower_lens",
     name: "Empower Lens +10%",
     short: "EMP+",
-    description: "Multiplies one existing lens output by 10%. Works on structural and damage lenses.",
+    description: "Multiplies one existing lens output by 10%, up to +60% total. Works on structural and damage lenses.",
     color: "#9dffcc",
     special: true,
     target: "filled",
@@ -427,7 +428,7 @@ export function applyUpgradeToSelectedRow(network) {
       resetSlot(slot, network.upgrade.selectedRow, network.upgrade.selectedColumn === 0);
       syncActiveColumn(network);
     } else if (card.id === "empower_lens") {
-      slot.specialMultiplier *= 1.1;
+      slot.specialMultiplier = Math.min(MAX_SPECIAL_MULTIPLIER, slot.specialMultiplier * 1.1);
     } else {
       return false;
     }
@@ -668,7 +669,7 @@ export function createPreviewNetwork(network) {
     }
 
     if (pendingCard.id === "empower_lens" && slot.filled) {
-      slot.specialMultiplier *= 1.1;
+      slot.specialMultiplier = Math.min(MAX_SPECIAL_MULTIPLIER, slot.specialMultiplier * 1.1);
     }
 
     return preview;
