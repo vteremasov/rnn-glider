@@ -34,15 +34,15 @@ export const ENEMY = {
 };
 
 export const MINIBOSS = {
-  baseRadius: 68,
-  radiusPerTier: 14,
-  speed: 38,
-  baseHp: 900,
-  hpPerTier: 600,
+  baseRadius: 78,
+  radiusPerTier: 18,
+  speed: 42,
+  baseHp: 1800,
+  hpPerTier: 1200,
 };
 
 export const BOSS = {
-  radius: 160,
-  speed: 28,
-  hp: 16000,
+  radius: 190,
+  speed: 32,
+  hp: 32000,
 };
