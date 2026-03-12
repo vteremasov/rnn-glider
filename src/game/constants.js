@@ -20,16 +20,29 @@ export const BULLET = {
   easeDuration: 0.32,
 };
 
+export const ELECTRIC = {
+  radius: 135,
+  damageFactor: 0.35,
+};
+
 export const ENEMY = {
   spawnInterval: 0.65,
   minRadius: 13,
   maxRadius: 34,
-  minSpeed: 45,
-  maxSpeed: 85,
+  minSpeed: 52,
+  maxSpeed: 98,
+};
+
+export const MINIBOSS = {
+  baseRadius: 68,
+  radiusPerTier: 14,
+  speed: 38,
+  baseHp: 900,
+  hpPerTier: 600,
 };
 
 export const BOSS = {
-  radius: 96,
+  radius: 160,
   speed: 28,
-  hp: 1600,
+  hp: 16000,
 };

@@ -2,6 +2,36 @@ const ROWS = 5;
 const MAX_COLUMNS = 5;
 const INITIAL_UPGRADE_COST = 100;
 
+export const SPECIAL_UPGRADE_CARDS = [
+  {
+    id: "engine_overclock",
+    name: "Engine Overclock +10%",
+    short: "ENG+",
+    description: "Boosts source energy by 10%. Each source row receives (5 * 10%) / 5 more energy.",
+    color: "#ffe27a",
+    special: true,
+    target: "none",
+  },
+  {
+    id: "reset_lens",
+    name: "Reset One Lens",
+    short: "RESET",
+    description: "Clears one existing lens so you can replace it with a future upgrade.",
+    color: "#ff9f9f",
+    special: true,
+    target: "filled",
+  },
+  {
+    id: "empower_lens",
+    name: "Empower Lens +10%",
+    short: "EMP+",
+    description: "Multiplies one existing lens output by 10%. Works on structural and damage lenses.",
+    color: "#9dffcc",
+    special: true,
+    target: "filled",
+  },
+];
+
 export const BUFF_LIBRARY = [
   {
     id: "multiplier",
@@ -17,7 +47,7 @@ export const BUFF_LIBRARY = [
     id: "crit",
     name: "Critical Core",
     short: "CRIT",
-    description: "Every shot from this row crits for double damage.",
+    description: "Every shot from this row crits for double damage and doubles burn damage if this row also ignites.",
     color: "#ffd56b",
     apply(slot) {
       slot.alwaysCrit = true;
@@ -32,6 +62,16 @@ export const BUFF_LIBRARY = [
     color: "#ff8e72",
     apply(slot) {
       slot.alwaysFire = true;
+    },
+  },
+  {
+    id: "electric",
+    name: "Electric Core",
+    short: "ARC",
+    description: "Every shot arcs electric damage to nearby enemies around the impact point.",
+    color: "#7cecff",
+    apply(slot) {
+      slot.alwaysElectric = true;
     },
   },
   {
@@ -131,6 +171,7 @@ function createSlot(row, isFrontColumn) {
     damageMultiplier: 1,
     alwaysCrit: false,
     alwaysFire: false,
+    alwaysElectric: false,
     alwaysCurse: false,
     alwaysPenetrate: false,
     relayMultiplier: false,
@@ -138,6 +179,7 @@ function createSlot(row, isFrontColumn) {
     mergerMultiplier: false,
     upLink: false,
     downLink: false,
+    specialMultiplier: 1,
     baseEnergy: isFrontColumn ? 1 : 1,
   };
 }
@@ -170,15 +212,18 @@ export function createWeaponNetwork() {
     rows: ROWS,
     maxColumns: MAX_COLUMNS,
     columns: [createColumn(0)],
+    engineMultiplier: 1,
     activeColumn: 0,
     nextUpgradeScore: getUpgradeCostForColumn(0),
     upgradeCost: getUpgradeCostForColumn(0),
     upgrade: {
       active: false,
+      mode: "normal",
       step: "card",
       cards: [],
       selectedCardIndex: 0,
       pendingCard: null,
+      selectedColumn: 0,
       selectedRow: 0,
     },
   };
@@ -224,11 +269,36 @@ export function countCompletedColumns(network) {
 
 export function beginUpgrade(network) {
   network.upgrade.active = true;
+  network.upgrade.mode = "normal";
   network.upgrade.step = "card";
   network.upgrade.cards = getRandomCards();
   network.upgrade.selectedCardIndex = 0;
   network.upgrade.pendingCard = null;
+  network.upgrade.selectedColumn = network.activeColumn;
   network.upgrade.selectedRow = getFirstEmptyRow(network);
+}
+
+function getFirstFilledTarget(network) {
+  for (let columnIndex = 0; columnIndex < network.columns.length; columnIndex += 1) {
+    const row = network.columns[columnIndex].slots.findIndex((slot) => slot.filled);
+    if (row !== -1) {
+      return { columnIndex, row };
+    }
+  }
+
+  return { columnIndex: 0, row: 0 };
+}
+
+export function beginSpecialUpgrade(network) {
+  const firstFilled = getFirstFilledTarget(network);
+  network.upgrade.active = true;
+  network.upgrade.mode = "special";
+  network.upgrade.step = "card";
+  network.upgrade.cards = SPECIAL_UPGRADE_CARDS;
+  network.upgrade.selectedCardIndex = 0;
+  network.upgrade.pendingCard = null;
+  network.upgrade.selectedColumn = firstFilled.columnIndex;
+  network.upgrade.selectedRow = firstFilled.row;
 }
 
 export function moveCardSelection(network, direction) {
@@ -243,14 +313,51 @@ export function chooseCard(network, cardIndex = network.upgrade.selectedCardInde
     return false;
   }
 
+  if (network.upgrade.mode === "special" && card.target === "none") {
+    network.engineMultiplier *= 1.1;
+    network.upgrade.active = false;
+    network.upgrade.pendingCard = null;
+    network.upgrade.cards = [];
+    network.upgrade.step = "card";
+    return true;
+  }
+
   network.upgrade.pendingCard = card;
   network.upgrade.selectedCardIndex = cardIndex;
   network.upgrade.step = "slot";
-  network.upgrade.selectedRow = getFirstEmptyRow(network);
+  if (network.upgrade.mode === "special") {
+    const firstFilled = getFirstFilledTarget(network);
+    network.upgrade.selectedColumn = firstFilled.columnIndex;
+    network.upgrade.selectedRow = firstFilled.row;
+  } else {
+    network.upgrade.selectedColumn = network.activeColumn;
+    network.upgrade.selectedRow = getFirstEmptyRow(network);
+  }
   return true;
 }
 
 export function moveRowSelection(network, direction) {
+  if (network.upgrade.mode === "special") {
+    const column = network.columns[network.upgrade.selectedColumn];
+    if (!column) {
+      return;
+    }
+
+    const filledRows = column.slots
+      .map((slot, row) => ({ slot, row }))
+      .filter(({ slot }) => slot.filled)
+      .map(({ row }) => row);
+
+    if (filledRows.length === 0) {
+      return;
+    }
+
+    const currentIndex = Math.max(0, filledRows.indexOf(network.upgrade.selectedRow));
+    const nextIndex = (currentIndex + direction + filledRows.length) % filledRows.length;
+    network.upgrade.selectedRow = filledRows[nextIndex];
+    return;
+  }
+
   const column = getActiveColumn(network);
   if (!column) {
     return;
@@ -270,7 +377,68 @@ export function moveRowSelection(network, direction) {
   network.upgrade.selectedRow = empties[nextIndex];
 }
 
+export function moveColumnSelection(network, direction) {
+  if (network.upgrade.mode !== "special") {
+    return;
+  }
+
+  const filledColumns = network.columns
+    .map((column, columnIndex) => ({ column, columnIndex }))
+    .filter(({ column }) => column.slots.some((slot) => slot.filled))
+    .map(({ columnIndex }) => columnIndex);
+
+  if (filledColumns.length === 0) {
+    return;
+  }
+
+  const currentIndex = Math.max(0, filledColumns.indexOf(network.upgrade.selectedColumn));
+  const nextIndex = (currentIndex + direction + filledColumns.length) % filledColumns.length;
+  network.upgrade.selectedColumn = filledColumns[nextIndex];
+
+  const nextColumn = network.columns[network.upgrade.selectedColumn];
+  const nextRow =
+    nextColumn.slots.findIndex((slot) => slot.filled) >= 0
+      ? nextColumn.slots.findIndex((slot) => slot.filled)
+      : 0;
+  network.upgrade.selectedRow = nextRow;
+}
+
+function syncActiveColumn(network) {
+  const firstIncomplete = network.columns.findIndex((column) => column.slots.some((slot) => !slot.filled));
+  network.activeColumn = firstIncomplete === -1 ? network.columns.length - 1 : firstIncomplete;
+  network.upgradeCost = getUpgradeCostForColumn(network.activeColumn);
+}
+
+function resetSlot(slot, row, isFrontColumn) {
+  const fresh = createSlot(row, isFrontColumn);
+  Object.assign(slot, fresh);
+}
+
 export function applyUpgradeToSelectedRow(network) {
+  if (network.upgrade.mode === "special") {
+    const card = network.upgrade.pendingCard;
+    const column = network.columns[network.upgrade.selectedColumn];
+    const slot = column?.slots[network.upgrade.selectedRow];
+    if (!card || !slot || !slot.filled) {
+      return false;
+    }
+
+    if (card.id === "reset_lens") {
+      resetSlot(slot, network.upgrade.selectedRow, network.upgrade.selectedColumn === 0);
+      syncActiveColumn(network);
+    } else if (card.id === "empower_lens") {
+      slot.specialMultiplier *= 1.1;
+    } else {
+      return false;
+    }
+
+    network.upgrade.active = false;
+    network.upgrade.pendingCard = null;
+    network.upgrade.cards = [];
+    network.upgrade.step = "card";
+    return true;
+  }
+
   const column = getActiveColumn(network);
   const card = network.upgrade.pendingCard;
   const slot = column?.slots[network.upgrade.selectedRow];
@@ -291,10 +459,14 @@ export function applyUpgradeToSelectedRow(network) {
   network.upgrade.cards = [];
   network.upgrade.step = "card";
 
-  if (isColumnFilled(column) && network.columns.length < network.maxColumns) {
+  const allExistingColumnsFilled = network.columns.every((existingColumn) => isColumnFilled(existingColumn));
+
+  if (allExistingColumnsFilled && network.columns.length < network.maxColumns) {
     network.columns.push(createColumn(network.columns.length));
     network.activeColumn = network.columns.length - 1;
     network.upgradeCost = getUpgradeCostForColumn(network.activeColumn);
+  } else {
+    syncActiveColumn(network);
   }
 
   network.nextUpgradeScore += network.upgradeCost;
@@ -319,6 +491,7 @@ function cloneSignal(signal) {
     amp: signal.amp,
     crit: signal.crit,
     fire: signal.fire,
+    electric: signal.electric,
     curse: signal.curse,
     penetration: signal.penetration,
     buffNames: [...signal.buffNames],
@@ -338,6 +511,7 @@ function mergeSignals(signals) {
     amp: 1,
     crit: false,
     fire: false,
+    electric: false,
     curse: false,
     penetration: false,
     buffNames: [],
@@ -350,6 +524,7 @@ function mergeSignals(signals) {
     merged.amp *= signal.amp;
     merged.crit = merged.crit || signal.crit;
     merged.fire = merged.fire || signal.fire;
+    merged.electric = merged.electric || signal.electric;
     merged.curse = merged.curse || signal.curse;
     merged.penetration = merged.penetration || signal.penetration;
     pushUnique(merged.buffNames, signal.buffNames);
@@ -371,23 +546,20 @@ function decorateSignal(signal, slot) {
   return signal;
 }
 
-function isTransformOnly(slot) {
-  return slot.relayMultiplier || slot.dividerMultiplier || slot.mergerMultiplier;
-}
-
-function createLocalSignal(slot, columnIndex, sourceColumnIndex) {
+function createLocalSignal(slot, columnIndex, sourceColumnIndex, engineMultiplier) {
   const receivesSource = columnIndex === sourceColumnIndex;
   const contributesEnergy = receivesSource || columnIndex === 0 || slot.filled;
 
-  if (!contributesEnergy || isTransformOnly(slot)) {
+  if (!contributesEnergy) {
     return null;
   }
 
   const signal = {
-    energy: slot.baseEnergy,
+    energy: slot.baseEnergy * (receivesSource ? engineMultiplier : 1),
     amp: slot.damageMultiplier,
     crit: slot.alwaysCrit,
     fire: slot.alwaysFire,
+    electric: slot.alwaysElectric,
     curse: slot.alwaysCurse,
     penetration: slot.alwaysPenetrate,
     buffNames: [],
@@ -406,6 +578,26 @@ function amplifySignal(signal, factor, slot) {
 
   next.amp *= factor;
   return decorateSignal(next, slot);
+}
+
+function scaleSignal(signal, factor, slot) {
+  const next = cloneSignal(signal);
+  if (!next) {
+    return null;
+  }
+
+  next.energy *= factor;
+  return slot ? decorateSignal(next, slot) : next;
+}
+
+function applySlotBoost(signal, slot) {
+  const next = cloneSignal(signal);
+  if (!next) {
+    return null;
+  }
+
+  next.amp *= slot?.specialMultiplier ?? 1;
+  return next;
 }
 
 function createEmptyNodes(columnCount) {
@@ -435,6 +627,13 @@ function buildConnection(from, to, signal) {
   };
 }
 
+function createForwardTarget(columnIndex, row) {
+  if (columnIndex > 0) {
+    return { type: "column", column: columnIndex - 1, row };
+  }
+  return { type: "gun", row };
+}
+
 export function cloneWeaponNetwork(network) {
   return {
     ...network,
@@ -451,8 +650,27 @@ export function cloneWeaponNetwork(network) {
 
 export function createPreviewNetwork(network) {
   const preview = cloneWeaponNetwork(network);
-  const { pendingCard, step, selectedRow } = preview.upgrade;
+  const { pendingCard, step, selectedColumn, selectedRow } = preview.upgrade;
   if (step !== "slot" || !pendingCard) {
+    return preview;
+  }
+
+  if (preview.upgrade.mode === "special") {
+    const column = preview.columns[selectedColumn];
+    const slot = column?.slots[selectedRow];
+    if (!slot) {
+      return preview;
+    }
+
+    if (pendingCard.id === "reset_lens" && slot.filled) {
+      resetSlot(slot, selectedRow, selectedColumn === 0);
+      syncActiveColumn(preview);
+    }
+
+    if (pendingCard.id === "empower_lens" && slot.filled) {
+      slot.specialMultiplier *= 1.1;
+    }
+
     return preview;
   }
 
@@ -480,70 +698,30 @@ export function resolveWeaponOutputs(network) {
   for (let columnIndex = network.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
     const column = network.columns[columnIndex];
     const outgoingLists = Array.from({ length: ROWS }, () => []);
-    const claimedRows = new Set();
+    const baseSignals = Array.from({ length: ROWS }, () => null);
+    const localAdditions = Array.from({ length: ROWS }, () => []);
+    const retainedShare = Array.from({ length: ROWS }, () => 1);
+    const mergerConsumers = Array.from({ length: ROWS }, () => []);
 
     for (let row = 0; row < ROWS; row += 1) {
-      const slot = column.slots[row];
-      const active = columnIndex === 0 || columnIndex === sourceColumnIndex || slot.filled;
-      if (!active || !slot.mergerMultiplier) {
-        continue;
-      }
-
-      const sourceRows = [row - 1, row, row + 1].filter((value) => value >= 0 && value < ROWS);
-      if (sourceRows.some((value) => claimedRows.has(value))) {
-        continue;
-      }
-
-      const merged = mergeSignals(sourceRows.map((value) => incoming[value]));
-      if (!merged) {
-        continue;
-      }
-
-      markNode(nodes, columnIndex, row, merged);
-      for (const value of sourceRows) {
-        if (incoming[value]) {
-          connections.push(
-            buildConnection(
-              { type: "column", column: columnIndex + 1, row: value },
-              { type: "column", column: columnIndex, row },
-              incoming[value],
-            ),
-          );
-        }
-      }
-
-      const outgoing = amplifySignal(merged, 1.1, slot);
-      outgoingLists[row].push(outgoing);
-      if (columnIndex > 0) {
-        connections.push(
-          buildConnection(
-            { type: "column", column: columnIndex, row },
-            { type: "column", column: columnIndex - 1, row },
-            outgoing,
-          ),
-        );
-      }
-      for (const value of sourceRows) {
-        claimedRows.add(value);
-      }
-    }
-
-    for (let row = 0; row < ROWS; row += 1) {
-      if (claimedRows.has(row)) {
-        continue;
-      }
-
       const slot = column.slots[row];
       const active = columnIndex === 0 || columnIndex === sourceColumnIndex || slot.filled;
       if (!active) {
         continue;
       }
 
-      const localSignal = createLocalSignal(slot, columnIndex, sourceColumnIndex);
+      const localSignal = createLocalSignal(
+        slot,
+        columnIndex,
+        sourceColumnIndex,
+        network.engineMultiplier,
+      );
       const combined = mergeSignals([incoming[row], localSignal]);
       if (!combined) {
         continue;
       }
+
+      baseSignals[row] = combined;
 
       if (incoming[row]) {
         connections.push(
@@ -563,82 +741,117 @@ export function resolveWeaponOutputs(network) {
           ),
         );
       }
-      markNode(nodes, columnIndex, row, combined);
+    }
 
-      if (slot.relayMultiplier) {
-        const outgoing = amplifySignal(combined, 1.1, slot);
-        outgoingLists[row].push(outgoing);
-        if (columnIndex > 0) {
-          connections.push(
-            buildConnection(
-              { type: "column", column: columnIndex, row },
-              { type: "column", column: columnIndex - 1, row },
-              outgoing,
-            ),
-          );
-        }
+    for (let row = 0; row < ROWS; row += 1) {
+      const slot = column.slots[row];
+      if (!slot?.mergerMultiplier) {
+        continue;
+      }
+
+      if (row > 0 && baseSignals[row - 1]) {
+        mergerConsumers[row - 1].push(row);
+      }
+      if (row < ROWS - 1 && baseSignals[row + 1]) {
+        mergerConsumers[row + 1].push(row);
+      }
+    }
+
+    for (let row = 0; row < ROWS; row += 1) {
+      const slot = column.slots[row];
+      const signal = baseSignals[row];
+      if (!slot || !signal) {
         continue;
       }
 
       if (slot.dividerMultiplier) {
-        const divided = amplifySignal(combined, 1.1, slot);
+        retainedShare[row] *= 0.5;
+        const branchBase = scaleSignal(applySlotBoost(signal, slot), 0.5);
         if (row > 0) {
-          outgoingLists[row - 1].push(cloneSignal(divided));
-          if (columnIndex > 0) {
-            connections.push(
-              buildConnection(
-                { type: "column", column: columnIndex, row },
-                { type: "column", column: columnIndex - 1, row: row - 1 },
-                divided,
-              ),
-            );
-          }
+          const branchUp = amplifySignal(branchBase, 1.1, slot);
+          localAdditions[row - 1].push(branchUp);
+          connections.push(
+            buildConnection(
+              { type: "column", column: columnIndex, row },
+              { type: "column", column: columnIndex, row: row - 1 },
+              branchUp,
+            ),
+          );
         }
         if (row < ROWS - 1) {
-          outgoingLists[row + 1].push(cloneSignal(divided));
-          if (columnIndex > 0) {
-            connections.push(
-              buildConnection(
-                { type: "column", column: columnIndex, row },
-                { type: "column", column: columnIndex - 1, row: row + 1 },
-                divided,
-              ),
-            );
-          }
+          const branchDown = amplifySignal(branchBase, 1.1, slot);
+          localAdditions[row + 1].push(branchDown);
+          connections.push(
+            buildConnection(
+              { type: "column", column: columnIndex, row },
+              { type: "column", column: columnIndex, row: row + 1 },
+              branchDown,
+            ),
+          );
         }
+      }
+
+      if (mergerConsumers[row].length > 0) {
+        retainedShare[row] *= 0.5;
+        const share = 0.5 / mergerConsumers[row].length;
+        for (const targetRow of mergerConsumers[row]) {
+          const mergerSlot = column.slots[targetRow];
+          const siphon = amplifySignal(scaleSignal(signal, share), 1.1, mergerSlot);
+          localAdditions[targetRow].push(siphon);
+          connections.push(
+            buildConnection(
+              { type: "column", column: columnIndex, row },
+              { type: "column", column: columnIndex, row: targetRow },
+              siphon,
+            ),
+          );
+        }
+      }
+    }
+
+    for (let row = 0; row < ROWS; row += 1) {
+      const slot = column.slots[row];
+      const baseSignal = baseSignals[row];
+      const retained = baseSignal ? scaleSignal(baseSignal, retainedShare[row]) : null;
+      const current = applySlotBoost(mergeSignals([retained, ...localAdditions[row]]), slot);
+      if (!slot || !current) {
         continue;
       }
 
-      outgoingLists[row].push(combined);
-      if (columnIndex > 0) {
-        connections.push(
-          buildConnection(
-            { type: "column", column: columnIndex, row },
-            { type: "column", column: columnIndex - 1, row },
-            combined,
-          ),
-        );
-      }
+      markNode(nodes, columnIndex, row, current);
 
-      if (slot.upLink && row > 0 && columnIndex > 0) {
-        const upward = amplifySignal(combined, 1.1, slot);
+      const forwardCurrent = slot.relayMultiplier
+        ? amplifySignal(current, 1.1, slot)
+        : current;
+
+      outgoingLists[row].push(forwardCurrent);
+      connections.push(
+        buildConnection(
+          { type: "column", column: columnIndex, row },
+          createForwardTarget(columnIndex, row),
+          forwardCurrent,
+        ),
+      );
+
+      if (slot.upLink && row > 0) {
+        const upward = amplifySignal(current, 1.1, slot);
         outgoingLists[row - 1].push(cloneSignal(upward));
         connections.push(
           buildConnection(
             { type: "column", column: columnIndex, row },
-            { type: "column", column: columnIndex - 1, row: row - 1 },
+            createForwardTarget(columnIndex, row - 1),
             upward,
           ),
         );
       }
 
-      if (slot.downLink && row < ROWS - 1 && columnIndex > 0) {
-        const downward = amplifySignal(combined, 1.1, slot);
+      if (slot.downLink && row < ROWS - 1) {
+        const downward = amplifySignal(current, 1.1, slot);
         outgoingLists[row + 1].push(cloneSignal(downward));
         connections.push(
           buildConnection(
             { type: "column", column: columnIndex, row },
-            { type: "column", column: columnIndex - 1, row: row + 1 },
+            createForwardTarget(columnIndex, row + 1),
             downward,
           ),
         );
@@ -661,6 +874,7 @@ export function resolveWeaponOutputs(network) {
         damage: Math.max(1, Math.round(signal.energy * signal.amp * 10) / 10),
         crit: signal.crit,
         fire: signal.fire,
+        electric: signal.electric,
         curse: signal.curse,
         penetration: signal.penetration,
         buffNames: signal.buffNames,

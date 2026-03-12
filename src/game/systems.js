@@ -1,7 +1,8 @@
-import { BULLET, GAME_HEIGHT, GAME_WIDTH, SHIP } from "./constants.js";
-import { createBoss, createBullet, createEnemy, resetGame } from "./spawners.js";
+import { BULLET, ELECTRIC, GAME_HEIGHT, GAME_WIDTH, SHIP } from "./constants.js";
+import { createBoss, createBullet, createEnemy, createMiniBoss, resetGame } from "./spawners.js";
 import {
   applyUpgradeToSelectedRow,
+  beginSpecialUpgrade,
   beginUpgrade,
   createPreviewNetwork,
   countCompletedColumns,
@@ -99,10 +100,21 @@ function damageEnemy(world, enemyEntity, damage) {
   enemy.hp -= damage;
 
   if (enemy.hp <= 0) {
+    const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
+    const scoreMultiplier = enemy.isMiniBoss ? 0 : 0.85 ** minibossesDefeated;
+
     if (enemy.isBoss) {
       world.resources.bossDefeated = true;
     }
-    world.resources.score += enemy.maxHp;
+    if (enemy.isMiniBoss) {
+      world.resources.minibossesDefeated = Math.max(
+        world.resources.minibossesDefeated ?? 0,
+        enemy.miniBossTier ?? 0,
+      );
+      world.resources.activeMinibossTier = 0;
+      world.resources.pendingSpecialUpgrade = true;
+    }
+    world.resources.score += Math.round(enemy.maxHp * scoreMultiplier);
     world.destroyEntity(enemyEntity);
     return true;
   }
@@ -194,12 +206,198 @@ function buildFlowChangeSet(baseFlow, previewFlow) {
 }
 
 function drawConnectionStroke(ctx, from, to, color, lineWidth, slotRadius) {
+  const sameColumn = Math.abs(from.x - to.x) < 1;
   ctx.beginPath();
-  ctx.moveTo(from.x + slotRadius + 8, from.y);
-  ctx.lineTo(to.x - slotRadius - 8, to.y);
+  if (sameColumn) {
+    const branchX = from.x + slotRadius + 22;
+    ctx.moveTo(from.x + slotRadius * 0.7, from.y);
+    ctx.bezierCurveTo(branchX, from.y, branchX, to.y, to.x + slotRadius * 0.7, to.y);
+  } else {
+    ctx.moveTo(from.x + slotRadius + 8, from.y);
+    ctx.lineTo(to.x - slotRadius - 8, to.y);
+  }
   ctx.strokeStyle = color;
   ctx.lineWidth = lineWidth;
   ctx.stroke();
+}
+
+function getConnectionPulsePoint(from, to, travel, slotRadius) {
+  const sameColumn = Math.abs(from.x - to.x) < 1;
+  if (!sameColumn) {
+    return {
+      x: from.x + (to.x - from.x) * travel,
+      y: from.y + (to.y - from.y) * travel,
+    };
+  }
+
+  const startX = from.x + slotRadius * 0.7;
+  const startY = from.y;
+  const control1X = from.x + slotRadius + 22;
+  const control1Y = from.y;
+  const control2X = from.x + slotRadius + 22;
+  const control2Y = to.y;
+  const endX = to.x + slotRadius * 0.7;
+  const endY = to.y;
+  const inverse = 1 - travel;
+
+  return {
+    x:
+      inverse ** 3 * startX +
+      3 * inverse ** 2 * travel * control1X +
+      3 * inverse * travel ** 2 * control2X +
+      travel ** 3 * endX,
+    y:
+      inverse ** 3 * startY +
+      3 * inverse ** 2 * travel * control1Y +
+      3 * inverse * travel ** 2 * control2Y +
+      travel ** 3 * endY,
+  };
+}
+
+function collectOutgoingRows(slot, row, rowCount) {
+  if (!slot) {
+    return [];
+  }
+
+  const rows = [row];
+  if (slot.upLink) {
+    rows.push(row - 1);
+  }
+  if (slot.downLink) {
+    rows.push(row + 1);
+  }
+
+  return [...new Set(rows)].filter((value) => value >= 0 && value < rowCount);
+}
+
+function collectLocalDividerTargets(slot, row, rowCount) {
+  if (!slot?.dividerMultiplier) {
+    return [];
+  }
+
+  return [row - 1, row + 1].filter((value) => value >= 0 && value < rowCount);
+}
+
+function collectLocalMergerSources(slot, row, rowCount) {
+  if (slot?.mergerMultiplier) {
+    return [row - 1, row + 1].filter((value) => value >= 0 && value < rowCount);
+  }
+
+  return [];
+}
+
+function drawNodeGlyph(ctx, slot, x, y, slotRadius, strokeColor) {
+  if (!slot?.filled) {
+    return;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = Math.max(1.5, slotRadius * 0.12);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  if (slot.dividerMultiplier) {
+    ctx.beginPath();
+    ctx.moveTo(x - slotRadius * 0.18, y);
+    ctx.lineTo(x + slotRadius * 0.04, y);
+    ctx.lineTo(x + slotRadius * 0.34, y - slotRadius * 0.28);
+    ctx.moveTo(x + slotRadius * 0.04, y);
+    ctx.lineTo(x + slotRadius * 0.34, y + slotRadius * 0.28);
+    ctx.stroke();
+  }
+
+  if (slot.mergerMultiplier) {
+    ctx.beginPath();
+    ctx.moveTo(x - slotRadius * 0.34, y - slotRadius * 0.28);
+    ctx.lineTo(x - slotRadius * 0.04, y);
+    ctx.lineTo(x + slotRadius * 0.22, y);
+    ctx.moveTo(x - slotRadius * 0.34, y + slotRadius * 0.28);
+    ctx.lineTo(x - slotRadius * 0.04, y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function formatBuildSummary(network) {
+  const rows = Array.from({ length: network.rows }, (_, row) => {
+    const parts = [];
+    for (let columnIndex = network.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
+      const slot = network.columns[columnIndex]?.slots[row];
+      parts.push(slot?.filled ? slot.buffShort : "...");
+    }
+    return `R${row + 1}: ${parts.join(" > ")}`;
+  });
+
+  return rows;
+}
+
+function drawVictoryOverlay(ctx, canvas, world) {
+  const network = world.resources.weaponNetwork;
+  const flow = resolveWeaponOutputs(network);
+  const panelX = 110;
+  const panelY = 240;
+  const panelWidth = canvas.width - 220;
+  const panelHeight = 470;
+  const panelCenterY = panelY + panelHeight * 0.5;
+  const rowSpacing = 68;
+  const shipEntity = world.query("Ship", "Transform")[0];
+  const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : null;
+
+  ctx.fillStyle = "rgba(6, 18, 10, 0.62)";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = "#ecfff1";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "bold 38px Trebuchet MS, sans-serif";
+  ctx.fillText("BOSS DESTROYED", canvas.width * 0.5, 110);
+  ctx.font = "22px Trebuchet MS, sans-serif";
+  ctx.fillText("Final build", canvas.width * 0.5, 152);
+
+  ctx.fillStyle = "rgba(8, 14, 30, 0.92)";
+  ctx.strokeStyle = "rgba(149, 189, 255, 0.28)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(panelX, panelY, panelWidth, panelHeight, 20);
+  ctx.fill();
+  ctx.stroke();
+
+  drawShip(ctx, panelX + 190, panelCenterY, SHIP.upgradeRenderScale);
+  drawWeaponGrid(ctx, world, {
+    flow,
+    signalTime: world.resources.signalTime,
+    frontX: panelX + panelWidth - 260,
+    centerY: panelCenterY,
+    rowSpacing,
+    columnSpacing: 102,
+    slotRadius: 24,
+    lineWidth: 3,
+    labelSize: 14,
+    buffSize: 11,
+    showBuffLabels: true,
+    gunOffsetX: 108,
+  });
+
+  if (ship) {
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
+      const output = flow.outputs[row];
+      const y = panelCenterY + (row - 2) * rowSpacing;
+      const damage = output ? output.damage : 0;
+      ctx.fillStyle = output ? bulletColor(output) : "#6e7e9f";
+      ctx.font = output ? "bold 18px Trebuchet MS, sans-serif" : "16px Trebuchet MS, sans-serif";
+      ctx.fillText(`DMG ${damage}`, panelX + 340, y);
+    }
+  }
+
+  ctx.fillStyle = "#dce8ff";
+  ctx.textAlign = "center";
+  ctx.font = "18px Trebuchet MS, sans-serif";
+  ctx.fillText(`Score ${world.resources.score}`, canvas.width * 0.5, panelY + panelHeight + 38);
+  ctx.font = "20px Trebuchet MS, sans-serif";
+  ctx.fillText("Press R to restart or keep flying.", canvas.width * 0.5, panelY + panelHeight + 76);
 }
 
 function drawGunEndpoint(ctx, x, y, scale, activeColor) {
@@ -234,6 +432,12 @@ function drawWeaponGrid(ctx, world, layout) {
   const activeColumn = getActiveColumn(network);
   const selectedRow =
     network.upgrade.active && network.upgrade.step === "slot" ? network.upgrade.selectedRow : null;
+  const selectedColumn =
+    network.upgrade.active && network.upgrade.step === "slot"
+      ? network.upgrade.mode === "special"
+        ? network.upgrade.selectedColumn
+        : network.activeColumn
+      : null;
   const shipEntity = world.query("Ship", "Transform")[0];
   const shipY = shipEntity ? world.getComponent(shipEntity, "Transform").y : GAME_HEIGHT * 0.5;
   const baseY = layout.centerY ?? shipY;
@@ -254,6 +458,19 @@ function drawWeaponGrid(ctx, world, layout) {
     return nodePositions.get(key);
   }
 
+  function getEndpointPosition(point) {
+    if (!point) {
+      return null;
+    }
+    if (point.type === "divider") {
+      return dividerPositions.get(point.row);
+    }
+    if (point.type === "gun") {
+      return gunPositions.get(point.row);
+    }
+    return getColumnPosition(point.column, point.row);
+  }
+
   ctx.lineWidth = layout.lineWidth ?? 2;
   ctx.strokeStyle = "rgba(146, 198, 255, 0.35)";
   ctx.fillStyle = "#1b2d52";
@@ -266,7 +483,12 @@ function drawWeaponGrid(ctx, world, layout) {
   ctx.font = `${layout.labelSize ?? 11}px Trebuchet MS, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText("5", engineX, baseY);
+  const engineValue = 5 * (network.engineMultiplier ?? 1);
+  const engineLabel =
+    Math.abs(engineValue - Math.round(engineValue)) < 0.01
+      ? String(Math.round(engineValue))
+      : engineValue.toFixed(1);
+  ctx.fillText(engineLabel, engineX, baseY);
 
   ctx.beginPath();
   ctx.moveTo(engineX + slotRadius + 8, baseY);
@@ -306,73 +528,98 @@ function drawWeaponGrid(ctx, world, layout) {
   for (let row = 0; row < network.rows; row += 1) {
     const y = baseY + (row - 2) * rowSpacing;
     gunPositions.set(row, { x: gunX, y });
-    const frontNode = getColumnPosition(0, row);
-    const output = flow.outputs[row];
-    const color = output ? bulletColor(output) : "rgba(146, 198, 255, 0.2)";
-    drawConnectionStroke(
-      ctx,
-      frontNode,
-      { x: gunX - 10, y },
-      color,
-      output ? (layout.lineWidth ?? 2) + 0.5 : layout.lineWidth ?? 2,
-      slotRadius,
-    );
+  }
 
-    if (output) {
-      const travel = (signalTime * 1.7 + row * 0.14) % 1;
-      const pulseX = frontNode.x + (gunX - 10 - frontNode.x) * travel;
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.8;
-      ctx.beginPath();
-      ctx.arc(pulseX, y, Math.max(2.6, slotRadius * 0.22), 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
+  for (let columnIndex = network.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
+    for (let row = 0; row < network.rows; row += 1) {
+      const slot = network.columns[columnIndex].slots[row];
+
+      for (const targetRow of collectLocalDividerTargets(slot, row, network.rows)) {
+        const from = getColumnPosition(columnIndex, row);
+        const to = getColumnPosition(columnIndex, targetRow);
+        if (from && to) {
+          drawConnectionStroke(
+            ctx,
+            from,
+            to,
+            "rgba(122, 156, 212, 0.16)",
+            (layout.lineWidth ?? 2) - 0.5,
+            slotRadius,
+          );
+        }
+      }
+
+      for (const sourceRow of collectLocalMergerSources(slot, row, network.rows)) {
+        const from = getColumnPosition(columnIndex, sourceRow);
+        const to = getColumnPosition(columnIndex, row);
+        if (from && to) {
+          drawConnectionStroke(
+            ctx,
+            from,
+            to,
+            "rgba(122, 156, 212, 0.16)",
+            (layout.lineWidth ?? 2) - 0.5,
+            slotRadius,
+          );
+        }
+      }
+    }
+
+    if (columnIndex === 0) {
+      continue;
+    }
+
+    const guideKeys = new Set();
+    for (let row = 0; row < network.rows; row += 1) {
+      const sourceSlot = network.columns[columnIndex].slots[row];
+      for (const targetRow of collectOutgoingRows(sourceSlot, row, network.rows)) {
+        const key = `${row}:${targetRow}`;
+        if (guideKeys.has(key)) {
+          continue;
+        }
+        guideKeys.add(key);
+
+        const from = getColumnPosition(columnIndex, row);
+        const to = getColumnPosition(columnIndex - 1, targetRow);
+        if (from && to) {
+          drawConnectionStroke(
+            ctx,
+            from,
+            to,
+            "rgba(122, 156, 212, 0.16)",
+            (layout.lineWidth ?? 2) - 0.5,
+            slotRadius,
+          );
+        }
+      }
     }
   }
 
-  for (let columnIndex = network.columns.length - 1; columnIndex > 0; columnIndex -= 1) {
-    for (let row = 0; row < network.rows; row += 1) {
-      const from = getColumnPosition(columnIndex, row);
-      if (!from) {
-        continue;
-      }
+  for (let row = 0; row < network.rows; row += 1) {
+    const from = getColumnPosition(0, row);
+    if (!from) {
+      continue;
+    }
 
-      if (row > 0) {
-        const to = getColumnPosition(columnIndex - 1, row - 1);
-        if (to) {
-          drawConnectionStroke(
-            ctx,
-            from,
-            to,
-            "rgba(122, 156, 212, 0.16)",
-            (layout.lineWidth ?? 2) - 0.5,
-            slotRadius,
-          );
-        }
-      }
-
-      if (row < network.rows - 1) {
-        const to = getColumnPosition(columnIndex - 1, row + 1);
-        if (to) {
-          drawConnectionStroke(
-            ctx,
-            from,
-            to,
-            "rgba(122, 156, 212, 0.16)",
-            (layout.lineWidth ?? 2) - 0.5,
-            slotRadius,
-          );
-        }
+    const slot = network.columns[0].slots[row];
+    for (const targetRow of collectOutgoingRows(slot, row, network.rows)) {
+      const gun = gunPositions.get(targetRow);
+      if (gun) {
+        drawConnectionStroke(
+          ctx,
+          from,
+          gun,
+          "rgba(122, 156, 212, 0.16)",
+          (layout.lineWidth ?? 2) - 0.5,
+          slotRadius,
+        );
       }
     }
   }
 
   for (const connection of flow.connections) {
-    const from =
-      connection.from.type === "divider"
-        ? dividerPositions.get(connection.from.row)
-        : getColumnPosition(connection.from.column, connection.from.row);
-    const to = getColumnPosition(connection.to.column, connection.to.row);
+    const from = getEndpointPosition(connection.from);
+    const to = getEndpointPosition(connection.to);
 
     if (!from || !to) {
       continue;
@@ -396,12 +643,17 @@ function drawWeaponGrid(ctx, world, layout) {
       const pulseCount = 2;
       for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex += 1) {
         const travel = (signalTime * 1.4 + pulseIndex / pulseCount) % 1;
-        const pulseX = from.x + (to.x - from.x) * travel;
-        const pulseY = from.y + (to.y - from.y) * travel;
+        const pulsePoint = getConnectionPulsePoint(from, to, travel, slotRadius);
         ctx.fillStyle = pulseColor;
         ctx.globalAlpha = changedConnections.has(connection.id) ? 0.95 : 0.75;
         ctx.beginPath();
-        ctx.arc(pulseX, pulseY, changedConnections.has(connection.id) ? 4.5 : 3.2, 0, Math.PI * 2);
+        ctx.arc(
+          pulsePoint.x,
+          pulsePoint.y,
+          changedConnections.has(connection.id) ? 4.5 : 3.2,
+          0,
+          Math.PI * 2,
+        );
         ctx.fill();
       }
       ctx.globalAlpha = 1;
@@ -419,11 +671,13 @@ function drawWeaponGrid(ctx, world, layout) {
       const isSelectable =
         network.upgrade.active &&
         network.upgrade.step === "slot" &&
-        column === activeColumn &&
-        !slot.filled;
+        (network.upgrade.mode === "special"
+          ? columnIndex === selectedColumn && slot.filled
+          : column === activeColumn && !slot.filled);
       const isSelected = isSelectable && network.upgrade.selectedRow === row;
       const isUnlocked = columnIndex <= network.activeColumn || slot.filled;
       const isChanged = changedNodes.has(`${columnIndex}:${row}`);
+      const isEmpowered = (slot.specialMultiplier ?? 1) > 1.001;
       const nodeColor = nodeFlow?.active
         ? mixColors(nodeFlow.buffColors, "#8ed8ff")
         : slot.filled && slot.buffColor
@@ -478,6 +732,23 @@ function drawWeaponGrid(ctx, world, layout) {
         ctx.stroke();
       }
 
+      if (isEmpowered) {
+        ctx.strokeStyle = "#ffe27a";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x, y, slotRadius + 8, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      drawNodeGlyph(
+        ctx,
+        slot,
+        x,
+        y,
+        slotRadius,
+        nodeFlow?.active ? mixColors(nodeFlow.buffColors, "#f7fdff") : "rgba(223, 239, 255, 0.9)",
+      );
+
       const labelSize = slot.filled && String(slot.buffShort).length > 3
         ? Math.max(8, (layout.labelSize ?? 11) - 2)
         : layout.labelSize ?? 11;
@@ -529,13 +800,25 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.font = "bold 26px Trebuchet MS, sans-serif";
-  ctx.fillText("Upgrade Phase", 48, 20);
+  ctx.fillText(upgrade.mode === "special" ? "Special Upgrade" : "Upgrade Phase", 48, 20);
   ctx.font = "16px Trebuchet MS, sans-serif";
 
   if (upgrade.step === "card") {
-    ctx.fillText("Choose a card: A/D or Left/Right, Enter confirms, 1/2/3 for direct pick.", 48, overlayTop);
+    ctx.fillText(
+      upgrade.mode === "special"
+        ? "Choose a special reward: A/D or Left/Right, Enter confirms, 1/2/3 for direct pick."
+        : "Choose a card: A/D or Left/Right, Enter confirms, 1/2/3 for direct pick.",
+      48,
+      overlayTop,
+    );
   } else {
-    ctx.fillText("Choose a target gun in the active column: W/S or Up/Down, Enter applies.", 48, overlayTop);
+    ctx.fillText(
+      upgrade.mode === "special"
+        ? "Choose an existing lens: A/D changes column, W/S changes row, Enter applies."
+        : "Choose a target gun in the active column: W/S or Up/Down, Enter applies.",
+      48,
+      overlayTop,
+    );
   }
 
   for (let index = 0; index < upgrade.cards.length; index += 1) {
@@ -544,22 +827,32 @@ function drawUpgradeOverlay(ctx, canvas, world) {
     const isSelected = upgrade.selectedCardIndex === index;
     const isPending = upgrade.pendingCard?.id === card.id;
 
-    ctx.fillStyle = isPending ? "#1f3f52" : "#13233d";
-    ctx.strokeStyle = isSelected ? card.color : "rgba(214, 228, 255, 0.2)";
-    ctx.lineWidth = isSelected ? 4 : 2;
+    ctx.fillStyle = card.special ? (isPending ? "#493b12" : "#2b2410") : isPending ? "#1f3f52" : "#13233d";
+    ctx.strokeStyle = isSelected ? card.color : card.special ? "rgba(255, 226, 122, 0.45)" : "rgba(214, 228, 255, 0.2)";
+    ctx.lineWidth = isSelected ? 4 : card.special ? 3 : 2;
     ctx.beginPath();
     ctx.roundRect(x, cardsY, cardWidth, cardHeight, 16);
     ctx.fill();
     ctx.stroke();
 
+    if (card.special) {
+      ctx.fillStyle = "rgba(255, 226, 122, 0.18)";
+      ctx.beginPath();
+      ctx.roundRect(x + 10, cardsY + 10, cardWidth - 20, 26, 10);
+      ctx.fill();
+      ctx.fillStyle = "#ffe27a";
+      ctx.font = "bold 12px Trebuchet MS, sans-serif";
+      ctx.fillText("SPECIAL", x + 18, cardsY + 16);
+    }
+
     ctx.fillStyle = card.color;
     ctx.font = "bold 24px Trebuchet MS, sans-serif";
-    ctx.fillText(`${index + 1}. ${card.name}`, x + 18, cardsY + 18);
+    ctx.fillText(`${index + 1}. ${card.name}`, x + 18, cardsY + (card.special ? 44 : 18));
     ctx.fillStyle = "#dbe8ff";
     ctx.font = "16px Trebuchet MS, sans-serif";
     const descriptionLines = wrapText(ctx, card.description, cardWidth - 36);
     for (let lineIndex = 0; lineIndex < descriptionLines.length; lineIndex += 1) {
-      ctx.fillText(descriptionLines[lineIndex], x + 18, cardsY + 62 + lineIndex * 22);
+      ctx.fillText(descriptionLines[lineIndex], x + 18, cardsY + (card.special ? 88 : 62) + lineIndex * 22);
     }
   }
 
@@ -567,6 +860,8 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   const panelY = 284;
   const panelWidth = canvas.width - 148;
   const panelHeight = 420;
+  const overlayCenterY = panelY + panelHeight * 0.5;
+  const overlayRowSpacing = 68;
   ctx.fillStyle = "rgba(8, 14, 30, 0.92)";
   ctx.strokeStyle = "rgba(149, 189, 255, 0.28)";
   ctx.lineWidth = 2;
@@ -582,8 +877,8 @@ function drawUpgradeOverlay(ctx, canvas, world) {
     changedConnections: changeSet.changedConnectionIds,
     changedNodes: changeSet.changedNodeKeys,
     frontX: panelX + panelWidth - 260,
-    centerY: panelY + panelHeight * 0.5,
-    rowSpacing: 68,
+    centerY: overlayCenterY,
+    rowSpacing: overlayRowSpacing,
     columnSpacing: 102,
     slotRadius: 24,
     lineWidth: 3,
@@ -600,7 +895,7 @@ function drawUpgradeOverlay(ctx, canvas, world) {
     ctx.textBaseline = "middle";
     for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
       const output = projectedOutputs[row];
-      const y = panelY + panelHeight * 0.5 + ship.gunOffsetsY[row] * 2.1;
+      const y = overlayCenterY + (row - 2) * overlayRowSpacing;
       const damage = output ? output.damage : 0;
       ctx.fillStyle = output ? bulletColor(output) : "#6e7e9f";
       ctx.font = output ? "bold 18px Trebuchet MS, sans-serif" : "16px Trebuchet MS, sans-serif";
@@ -611,7 +906,9 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   ctx.fillStyle = "#dbe8ff";
   ctx.font = "16px Trebuchet MS, sans-serif";
   ctx.fillText(
-    `Column ${network.activeColumn + 1}/${network.maxColumns}   Next cost: ${network.upgradeCost}`,
+    upgrade.mode === "special"
+      ? "MiniBoss reward: choose one special upgrade."
+      : `Column ${network.activeColumn + 1}/${network.maxColumns}   Next cost: ${network.upgradeCost}`,
     panelX + 26,
     panelY + panelHeight - 40,
   );
@@ -621,6 +918,12 @@ function getBossEntity(world) {
   return world
     .query("Enemy")
     .find((entity) => world.getComponent(entity, "Enemy")?.isBoss);
+}
+
+function getMiniBossEntity(world) {
+  return world
+    .query("Enemy")
+    .find((entity) => world.getComponent(entity, "Enemy")?.isMiniBoss);
 }
 
 export function createShipFlightSystem() {
@@ -726,12 +1029,23 @@ export function createEnemySpawnSystem() {
       return;
     }
 
-    if (world.resources.bossSpawned || isNetworkComplete(world.resources.weaponNetwork)) {
+    if (
+      world.resources.bossSpawned ||
+      world.resources.activeMinibossTier > 0 ||
+      isNetworkComplete(world.resources.weaponNetwork)
+    ) {
       return;
     }
 
+    const completedColumns = countCompletedColumns(world.resources.weaponNetwork);
+    const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
+    const spawnInterval = Math.max(
+      0.18,
+      world.resources.enemySpawnInterval - completedColumns * 0.04 - minibossesDefeated * 0.12,
+    );
+
     world.resources.enemySpawnTimer += dt;
-    if (world.resources.enemySpawnTimer < world.resources.enemySpawnInterval) {
+    if (world.resources.enemySpawnTimer < spawnInterval) {
       return;
     }
 
@@ -856,8 +1170,28 @@ export function collisionSystem(world) {
         continue;
       }
 
-      const damage = bullet.crit ? bullet.damage * 2 : bullet.damage;
-      damageEnemy(world, enemyEntity, damage);
+      const hitDamage = bullet.crit ? bullet.damage * 2 : bullet.damage;
+      const impactX = enemyPos.x;
+      const impactY = enemyPos.y;
+      damageEnemy(world, enemyEntity, hitDamage);
+
+      if (bullet.electric) {
+        const chainDamage = Math.max(1, Math.round(hitDamage * ELECTRIC.damageFactor));
+        for (const chainedEntity of enemyEntities) {
+          if (chainedEntity === enemyEntity || !world.entities.has(chainedEntity)) {
+            continue;
+          }
+
+          const chainedPos = world.getComponent(chainedEntity, "Transform");
+          const dx = chainedPos.x - impactX;
+          const dy = chainedPos.y - impactY;
+          if (dx * dx + dy * dy > ELECTRIC.radius * ELECTRIC.radius) {
+            continue;
+          }
+
+          damageEnemy(world, chainedEntity, chainDamage);
+        }
+      }
 
       if (world.entities.has(enemyEntity) && bullet.fire) {
         const enemy = world.getComponent(enemyEntity, "Enemy");
@@ -911,7 +1245,7 @@ export function collisionSystem(world) {
 
     ship.hp -= 1;
     ship.contactCooldown = 0.6;
-    if (!enemy.isBoss) {
+    if (!enemy.isBoss && !enemy.isMiniBoss) {
       world.destroyEntity(enemyEntity);
     }
     if (ship.hp <= 0) {
@@ -947,6 +1281,7 @@ export function stateSystem(world) {
   }
 
   const network = world.resources.weaponNetwork;
+  const completedColumns = countCompletedColumns(network);
 
   if (world.resources.commitUpgrade) {
     applyUpgradeToSelectedRow(network);
@@ -955,17 +1290,38 @@ export function stateSystem(world) {
 
   if (
     !world.resources.gameOver &&
-    !network.upgrade.active &&
-    hasAvailableUpgrade(network) &&
-    world.resources.score >= network.nextUpgradeScore
+    world.resources.pendingSpecialUpgrade &&
+    !network.upgrade.active
   ) {
     clearDirectionalInput(world);
-    beginUpgrade(network);
+    beginSpecialUpgrade(network);
+    world.resources.pendingSpecialUpgrade = false;
+    return;
   }
 
   if (
     !world.resources.gameOver &&
     !world.resources.bossSpawned &&
+    world.resources.activeMinibossTier === 0 &&
+    completedColumns > (world.resources.minibossesDefeated ?? 0) &&
+    completedColumns < network.maxColumns
+  ) {
+    world.resources.activeMinibossTier = completedColumns;
+    createMiniBoss(world, completedColumns);
+    for (const entity of world.query("Enemy")) {
+      const enemy = world.getComponent(entity, "Enemy");
+      if (!enemy?.isMiniBoss) {
+        world.destroyEntity(entity);
+      }
+    }
+    world.resources.enemySpawnTimer = 0;
+    return;
+  }
+
+  if (
+    !world.resources.gameOver &&
+    !world.resources.bossSpawned &&
+    world.resources.activeMinibossTier === 0 &&
     isNetworkComplete(network)
   ) {
     world.resources.bossSpawned = true;
@@ -977,6 +1333,17 @@ export function stateSystem(world) {
       }
     }
     world.resources.enemySpawnTimer = 0;
+    return;
+  }
+
+  if (
+    !world.resources.gameOver &&
+    !network.upgrade.active &&
+    hasAvailableUpgrade(network) &&
+    world.resources.score >= network.nextUpgradeScore
+  ) {
+    clearDirectionalInput(world);
+    beginUpgrade(network);
   }
 }
 
@@ -1027,21 +1394,40 @@ export function createRenderSystem(ctx, canvas) {
           ctx.lineWidth = 5;
           ctx.stroke();
         }
+        if (enemy.isMiniBoss) {
+          ctx.strokeStyle = "#ffe2bf";
+          ctx.lineWidth = 4;
+          ctx.stroke();
+        }
 
         const debuffColors = enemyDebuffColors(enemy);
         if (debuffColors.length > 0) {
           ctx.strokeStyle = mixColors(debuffColors, "#f1f6ff");
-          ctx.lineWidth = enemy.isBoss ? 10 : 4;
+          ctx.lineWidth = enemy.isBoss ? 10 : enemy.isMiniBoss ? 7 : 4;
           ctx.beginPath();
-          ctx.arc(transform.x, transform.y, body.radius + (enemy.isBoss ? 9 : 5), 0, Math.PI * 2);
+          ctx.arc(
+            transform.x,
+            transform.y,
+            body.radius + (enemy.isBoss ? 9 : enemy.isMiniBoss ? 7 : 5),
+            0,
+            Math.PI * 2,
+          );
           ctx.stroke();
         }
 
         ctx.fillStyle = "#0c1020";
-        ctx.font = enemy.isBoss ? "bold 22px Trebuchet MS, sans-serif" : "bold 14px Trebuchet MS, sans-serif";
+        ctx.font = enemy.isBoss
+          ? "bold 22px Trebuchet MS, sans-serif"
+          : enemy.isMiniBoss
+            ? "bold 18px Trebuchet MS, sans-serif"
+            : "bold 14px Trebuchet MS, sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(String(Math.ceil(enemy.hp)), transform.x, transform.y);
+        const centerLabel =
+          enemy.isBoss || enemy.isMiniBoss
+            ? enemy.bossName ?? (enemy.isBoss ? "Boss Core" : "MiniBoss")
+            : String(Math.ceil(enemy.hp));
+        ctx.fillText(centerLabel, transform.x, transform.y);
       }
 
       if (render.type === "damageText") {
@@ -1083,15 +1469,45 @@ export function createRenderSystem(ctx, canvas) {
     ctx.fillText(`Move: W/A/S/D`, 14, 58);
     ctx.fillText(`Next upgrade: ${network.nextUpgradeScore}`, 14, 80);
     ctx.fillText(`Columns: ${network.columns.length}/${network.maxColumns}`, 14, 102);
-    ctx.fillText(`Enemy tier: ${countCompletedColumns(network)}`, 14, 124);
+    ctx.fillText(
+      `Threat tier: ${countCompletedColumns(network) + (world.resources.minibossesDefeated ?? 0) * 2}`,
+      14,
+      124,
+    );
+    ctx.fillText(`Minibosses: ${world.resources.minibossesDefeated ?? 0}/${network.maxColumns - 1}`, 14, 146);
 
     const bossEntity = getBossEntity(world);
+    const miniBossEntity = getMiniBossEntity(world);
+    if (miniBossEntity) {
+      const miniboss = world.getComponent(miniBossEntity, "Enemy");
+      const barWidth = 280;
+      const barHeight = 14;
+      const x = canvas.width - barWidth - 24;
+      const y = 20;
+      const progress = Math.max(0, miniboss.hp / miniboss.maxHp);
+
+      ctx.fillStyle = "rgba(8, 14, 30, 0.9)";
+      ctx.fillRect(x - 8, y - 10, barWidth + 16, 38);
+      ctx.fillStyle = "#3a2412";
+      ctx.fillRect(x, y + 8, barWidth, barHeight);
+      ctx.fillStyle = "#ff8d57";
+      ctx.fillRect(x, y + 8, barWidth * progress, barHeight);
+      ctx.strokeStyle = "rgba(255, 227, 196, 0.9)";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y + 8, barWidth, barHeight);
+      ctx.fillStyle = "#ffe8d1";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      ctx.font = "bold 16px Trebuchet MS, sans-serif";
+      ctx.fillText(miniboss.bossName ?? `MiniBoss T${miniboss.miniBossTier}`, x, y - 2);
+    }
+
     if (bossEntity) {
       const boss = world.getComponent(bossEntity, "Enemy");
       const barWidth = 320;
       const barHeight = 18;
       const x = canvas.width - barWidth - 24;
-      const y = 20;
+      const y = miniBossEntity ? 72 : 20;
       const progress = Math.max(0, boss.hp / boss.maxHp);
 
       ctx.fillStyle = "rgba(8, 14, 30, 0.9)";
@@ -1107,19 +1523,11 @@ export function createRenderSystem(ctx, canvas) {
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.font = "bold 16px Trebuchet MS, sans-serif";
-      ctx.fillText("Boss Core", x, y - 2);
+      ctx.fillText(boss.bossName ?? "Boss Core", x, y - 2);
     }
 
     if (world.resources.bossDefeated && !world.resources.gameOver) {
-      ctx.fillStyle = "rgba(6, 18, 10, 0.5)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "#ecfff1";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.font = "bold 38px Trebuchet MS, sans-serif";
-      ctx.fillText("BOSS DESTROYED", canvas.width * 0.5, canvas.height * 0.44);
-      ctx.font = "20px Trebuchet MS, sans-serif";
-      ctx.fillText("Press R to restart or keep flying.", canvas.width * 0.5, canvas.height * 0.53);
+      drawVictoryOverlay(ctx, canvas, world);
     }
 
     if (network.upgrade.active) {

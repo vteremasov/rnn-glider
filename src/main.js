@@ -1,7 +1,13 @@
 import { World } from "./ecs/world.js";
 import { ENEMY, GAME_HEIGHT, GAME_WIDTH } from "./game/constants.js";
 import { createShip } from "./game/spawners.js";
-import { chooseCard, createWeaponNetwork, moveCardSelection, moveRowSelection } from "./game/weapon-network.js";
+import {
+  chooseCard,
+  createWeaponNetwork,
+  moveCardSelection,
+  moveColumnSelection,
+  moveRowSelection,
+} from "./game/weapon-network.js";
 import {
   backgroundParallaxSystem,
   cleanupSystem,
@@ -27,6 +33,9 @@ world.resources = {
   gameOver: false,
   bossSpawned: false,
   bossDefeated: false,
+  minibossesDefeated: 0,
+  activeMinibossTier: 0,
+  pendingSpecialUpgrade: false,
   score: 0,
   restartRequested: false,
   commitUpgrade: false,
@@ -120,6 +129,17 @@ function handleUpgradeInput(event) {
   }
 
   if (upgrade.step === "slot") {
+    if (upgrade.mode === "special") {
+      if (event.code === "ArrowLeft" || event.code === "KeyA") {
+        moveColumnSelection(world.resources.weaponNetwork, -1);
+        return true;
+      }
+      if (event.code === "ArrowRight" || event.code === "KeyD") {
+        moveColumnSelection(world.resources.weaponNetwork, 1);
+        return true;
+      }
+    }
+
     if (event.code === "ArrowUp" || event.code === "KeyW") {
       moveRowSelection(world.resources.weaponNetwork, -1);
       return true;

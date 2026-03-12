@@ -1,4 +1,4 @@
-import { BOSS, BULLET, ENEMY, GAME_HEIGHT, GAME_WIDTH, SHIP } from "./constants.js";
+import { BOSS, BULLET, ENEMY, GAME_HEIGHT, GAME_WIDTH, MINIBOSS, SHIP } from "./constants.js";
 import { countCompletedColumns, createWeaponNetwork } from "./weapon-network.js";
 
 function randomBetween(min, max) {
@@ -15,6 +15,16 @@ function enemyColor(hp) {
     "#f07cff",
   ];
   return palette[Math.min(hp - 1, palette.length - 1)];
+}
+
+function getMiniBossName(tier) {
+  const names = [
+    "Sir Bump",
+    "Count Chonkula",
+    "Admiral Wobble",
+    "The Orb Accountant",
+  ];
+  return names[(tier - 1) % names.length];
 }
 
 export function createShip(world) {
@@ -46,6 +56,7 @@ export function createBullet(world, x, y, stats) {
     damage: stats?.damage ?? BULLET.damage,
     crit: stats?.crit ?? false,
     fire: stats?.fire ?? false,
+    electric: stats?.electric ?? false,
     curse: stats?.curse ?? false,
     penetration: stats?.penetration ?? false,
     row: stats?.row ?? 0,
@@ -61,11 +72,16 @@ export function createBullet(world, x, y, stats) {
 
 export function createEnemy(world) {
   const completedColumns = countCompletedColumns(world.resources.weaponNetwork);
-  const hpScale = 1 + completedColumns * 0.45;
-  const speedScale = 1 + completedColumns * 0.16;
-  const radius = randomBetween(ENEMY.minRadius, ENEMY.maxRadius);
+  const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
+  const hpScale = 1.15 + completedColumns * 1.15 + minibossesDefeated * 2.6;
+  const speedScale = 1.05 + completedColumns * 0.28 + minibossesDefeated * 0.42;
+  const radiusBonus = completedColumns * 4 + minibossesDefeated * 12;
+  const radius = randomBetween(ENEMY.minRadius + radiusBonus, ENEMY.maxRadius + radiusBonus);
   const speed = randomBetween(ENEMY.minSpeed, ENEMY.maxSpeed) * speedScale;
-  const hp = Math.max(12, Math.round((radius / 2 + 8) * hpScale));
+  const hp = Math.max(
+    58,
+    Math.round((radius / 2 + 30 + completedColumns * 7 + minibossesDefeated * 18) * hpScale),
+  );
   const y = randomBetween(radius + 16, GAME_HEIGHT - radius - 16);
 
   const enemy = world.createEntity();
@@ -77,6 +93,8 @@ export function createEnemy(world) {
     maxHp: hp,
     speed,
     isBoss: false,
+    isMiniBoss: false,
+    miniBossTier: 0,
     burnTicks: 0,
     burnTimer: 0,
     burnDamage: 0,
@@ -86,6 +104,35 @@ export function createEnemy(world) {
   });
   world.addComponent(enemy, "Render", { type: "enemy", color: enemyColor(hp) });
   return enemy;
+}
+
+export function createMiniBoss(world, tier) {
+  const radius = MINIBOSS.baseRadius + (tier - 1) * MINIBOSS.radiusPerTier;
+  const hp = MINIBOSS.baseHp + tier * MINIBOSS.hpPerTier;
+  const boss = world.createEntity();
+  world.addComponent(boss, "Transform", {
+    x: GAME_WIDTH + radius * 0.55,
+    y: GAME_HEIGHT * (0.26 + tier * 0.11),
+  });
+  world.addComponent(boss, "Velocity", { x: -MINIBOSS.speed, y: 0 });
+  world.addComponent(boss, "CircleCollider", { radius });
+  world.addComponent(boss, "Enemy", {
+    hp,
+    maxHp: hp,
+    speed: MINIBOSS.speed,
+    isBoss: false,
+    isMiniBoss: true,
+    miniBossTier: tier,
+    bossName: getMiniBossName(tier),
+    burnTicks: 0,
+    burnTimer: 0,
+    burnDamage: 0,
+    curseTicks: 0,
+    curseTimer: 0,
+    curseDamage: 0,
+  });
+  world.addComponent(boss, "Render", { type: "enemy", color: "#ff8d57" });
+  return boss;
 }
 
 export function createBoss(world) {
@@ -101,6 +148,9 @@ export function createBoss(world) {
     maxHp: BOSS.hp,
     speed: BOSS.speed,
     isBoss: true,
+    isMiniBoss: false,
+    miniBossTier: 0,
+    bossName: "The Glorious Meatball",
     burnTicks: 0,
     burnTimer: 0,
     burnDamage: 0,
@@ -127,6 +177,9 @@ export function resetGame(world) {
     gameOver: false,
     bossSpawned: false,
     bossDefeated: false,
+    minibossesDefeated: 0,
+    activeMinibossTier: 0,
+    pendingSpecialUpgrade: false,
     score: 0,
     commitUpgrade: false,
     signalTime: world.resources.signalTime ?? 0,
