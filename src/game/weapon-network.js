@@ -1,14 +1,35 @@
+import { ELECTRIC } from "./constants.js";
+
 const ROWS = 5;
 const MAX_COLUMNS = 5;
 const INITIAL_UPGRADE_COST = 100;
+const ENGINE_OVERCLOCK_STEP = 0.1;
+const SPECIAL_EMPOWER_STEP = 0.1;
 const MAX_SPECIAL_MULTIPLIER = 1.6;
+const LOCAL_MULTIPLIER_STEP = 0.1;
+const OVERDRIVE_STEP = 0.35;
+const BURN_DAMAGE_FACTOR = 0.2;
+const DIVIDER_SPLIT_SHARE = 0.5;
+const DIVIDER_BONUS_STEP = 0.1;
+const MERGER_PULL_SHARE = 0.5;
+const MERGER_BONUS_STEP = 0.1;
+const RELAY_BONUS_STEP = 0.1;
+const LINK_BONUS_STEP = 0.1;
+
+function formatPercent(value) {
+  return `${Math.round(value * 100)}%`;
+}
+
+function formatBonus(multiplier) {
+  return `+${Math.round((multiplier - 1) * 100)}%`;
+}
 
 export const SPECIAL_UPGRADE_CARDS = [
   {
     id: "engine_overclock",
-    name: "Engine Overclock +10%",
+    name: `Engine Overclock ${formatBonus(1 + ENGINE_OVERCLOCK_STEP)}`,
     short: "ENG+",
-    description: "Boosts source energy by 10%. Each source row receives (5 * 10%) / 5 more energy.",
+    description: `Boosts source energy by ${formatPercent(ENGINE_OVERCLOCK_STEP)}. Each source row receives (5 * ${formatPercent(ENGINE_OVERCLOCK_STEP)}) / 5 more energy.`,
     color: "#ffe27a",
     special: true,
     target: "none",
@@ -24,9 +45,9 @@ export const SPECIAL_UPGRADE_CARDS = [
   },
   {
     id: "empower_lens",
-    name: "Empower Lens +10%",
+    name: `Empower Lens ${formatBonus(1 + SPECIAL_EMPOWER_STEP)}`,
     short: "EMP+",
-    description: "Multiplies one existing lens output by 10%, up to +60% total. Works on structural and damage lenses.",
+    description: `Boosts one existing lens output by ${formatPercent(SPECIAL_EMPOWER_STEP)} per pick, up to ${formatBonus(MAX_SPECIAL_MULTIPLIER)} total. Works on structural and damage lenses.`,
     color: "#9dffcc",
     special: true,
     target: "filled",
@@ -36,19 +57,19 @@ export const SPECIAL_UPGRADE_CARDS = [
 export const BUFF_LIBRARY = [
   {
     id: "multiplier",
-    name: "Local Multiplier +10%",
+    name: `Local Multiplier ${formatBonus(1 + LOCAL_MULTIPLIER_STEP)}`,
     short: "AMP",
-    description: "Amplifies this lens output by 10%.",
+    description: `Amplifies this lens output by ${formatPercent(LOCAL_MULTIPLIER_STEP)}.`,
     color: "#7ce8b5",
     apply(slot) {
-      slot.damageMultiplier += 0.1;
+      slot.damageMultiplier += LOCAL_MULTIPLIER_STEP;
     },
   },
   {
     id: "crit",
     name: "Critical Core",
     short: "CRIT",
-    description: "Every shot from this row crits for double damage and doubles burn damage if this row also ignites.",
+    description: `Every shot from this row crits for double damage and doubles burn damage if this row also ignites.`,
     color: "#ffd56b",
     apply(slot) {
       slot.alwaysCrit = true;
@@ -59,7 +80,7 @@ export const BUFF_LIBRARY = [
     name: "Fire Core",
     short: "FIRE",
     description:
-      "Every shot ignites. Burn deals 20% periodic damage, doubled if this row also crits.",
+      `Every shot ignites. Burn deals ${formatPercent(BURN_DAMAGE_FACTOR)} periodic damage, doubled if this row also crits.`,
     color: "#ff8e72",
     apply(slot) {
       slot.alwaysFire = true;
@@ -69,7 +90,7 @@ export const BUFF_LIBRARY = [
     id: "electric",
     name: "Electric Core",
     short: "ARC",
-    description: "Every shot arcs electric damage to nearby enemies around the impact point.",
+    description: `Every shot arcs ${formatPercent(ELECTRIC.damageFactor)} electric damage to nearby enemies around the impact point.`,
     color: "#7cecff",
     apply(slot) {
       slot.alwaysElectric = true;
@@ -87,20 +108,20 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "overdrive",
-    name: "Overdrive +35%",
+    name: `Overdrive ${formatBonus(1 + OVERDRIVE_STEP)}`,
     short: "OVR",
-    description: "Raises this lens output by 35%.",
+    description: `Raises this lens output by ${formatPercent(OVERDRIVE_STEP)}.`,
     color: "#ffb56b",
     apply(slot) {
-      slot.damageMultiplier += 0.35;
+      slot.damageMultiplier += OVERDRIVE_STEP;
     },
   },
   {
     id: "uplink",
-    name: "Up-Link +10%",
+    name: `Up-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
     short: "UP",
     description:
-      "Sends the normal signal forward and a second +10% copy into the upper row of the next column.",
+      `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} copy into the upper row of the next column.`,
     color: "#72e0ff",
     apply(slot) {
       slot.upLink = true;
@@ -108,10 +129,10 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "downlink",
-    name: "Down-Link +10%",
+    name: `Down-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
     short: "DOWN",
     description:
-      "Sends the normal signal forward and a second +10% copy into the lower row of the next column.",
+      `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} copy into the lower row of the next column.`,
     color: "#a890ff",
     apply(slot) {
       slot.downLink = true;
@@ -129,10 +150,10 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "relay_multiplier",
-    name: "Back Multiplier +10%",
+    name: `Back Multiplier ${formatBonus(1 + RELAY_BONUS_STEP)}`,
     short: "BACK",
     description:
-      "Does not power this lens. Multiplies all incoming signal from behind by 10% and forwards it.",
+      `Does not power this lens. Multiplies all incoming signal from behind by ${formatPercent(RELAY_BONUS_STEP)} and forwards it.`,
     color: "#6bf0da",
     apply(slot) {
       slot.relayMultiplier = true;
@@ -140,9 +161,9 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "divider_multiplier",
-    name: "Divider +10%",
+    name: `Divider ${formatBonus(1 + DIVIDER_BONUS_STEP)}`,
     short: "DIV2",
-    description: "Splits incoming signal into top and bottom rows, each amplified by 10%.",
+    description: `Keeps ${formatPercent(1 - DIVIDER_SPLIT_SHARE)} on the current path and splits ${formatPercent(DIVIDER_SPLIT_SHARE)} into top and bottom rows of this column, each amplified by ${formatPercent(DIVIDER_BONUS_STEP)}.`,
     color: "#7bb4ff",
     apply(slot) {
       slot.dividerMultiplier = true;
@@ -150,10 +171,10 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "merger_multiplier",
-    name: "Merger +10%",
+    name: `Merger ${formatBonus(1 + MERGER_BONUS_STEP)}`,
     short: "MRG3",
     description:
-      "Merges top, current, and bottom signals, amplifies by 10%, and sends one signal forward.",
+      `Pulls ${formatPercent(MERGER_PULL_SHARE)} from adjacent top and bottom rows in this column, amplifies that siphoned signal by ${formatPercent(MERGER_BONUS_STEP)}, and adds it to the current path.`,
     color: "#ff8ed8",
     apply(slot) {
       slot.mergerMultiplier = true;
@@ -315,7 +336,7 @@ export function chooseCard(network, cardIndex = network.upgrade.selectedCardInde
   }
 
   if (network.upgrade.mode === "special" && card.target === "none") {
-    network.engineMultiplier *= 1.1;
+    network.engineMultiplier *= 1 + ENGINE_OVERCLOCK_STEP;
     network.upgrade.active = false;
     network.upgrade.pendingCard = null;
     network.upgrade.cards = [];
@@ -428,7 +449,10 @@ export function applyUpgradeToSelectedRow(network) {
       resetSlot(slot, network.upgrade.selectedRow, network.upgrade.selectedColumn === 0);
       syncActiveColumn(network);
     } else if (card.id === "empower_lens") {
-      slot.specialMultiplier = Math.min(MAX_SPECIAL_MULTIPLIER, slot.specialMultiplier * 1.1);
+      slot.specialMultiplier = Math.min(
+        MAX_SPECIAL_MULTIPLIER,
+        slot.specialMultiplier * (1 + SPECIAL_EMPOWER_STEP),
+      );
     } else {
       return false;
     }
@@ -669,7 +693,10 @@ export function createPreviewNetwork(network) {
     }
 
     if (pendingCard.id === "empower_lens" && slot.filled) {
-      slot.specialMultiplier = Math.min(MAX_SPECIAL_MULTIPLIER, slot.specialMultiplier * 1.1);
+      slot.specialMultiplier = Math.min(
+        MAX_SPECIAL_MULTIPLIER,
+        slot.specialMultiplier * (1 + SPECIAL_EMPOWER_STEP),
+      );
     }
 
     return preview;
@@ -766,10 +793,10 @@ export function resolveWeaponOutputs(network) {
       }
 
       if (slot.dividerMultiplier) {
-        retainedShare[row] *= 0.5;
-        const branchBase = scaleSignal(applySlotBoost(signal, slot), 0.5);
+        retainedShare[row] *= 1 - DIVIDER_SPLIT_SHARE;
+        const branchBase = scaleSignal(applySlotBoost(signal, slot), DIVIDER_SPLIT_SHARE);
         if (row > 0) {
-          const branchUp = amplifySignal(branchBase, 1.1, slot);
+          const branchUp = amplifySignal(branchBase, 1 + DIVIDER_BONUS_STEP, slot);
           localAdditions[row - 1].push(branchUp);
           connections.push(
             buildConnection(
@@ -780,7 +807,7 @@ export function resolveWeaponOutputs(network) {
           );
         }
         if (row < ROWS - 1) {
-          const branchDown = amplifySignal(branchBase, 1.1, slot);
+          const branchDown = amplifySignal(branchBase, 1 + DIVIDER_BONUS_STEP, slot);
           localAdditions[row + 1].push(branchDown);
           connections.push(
             buildConnection(
@@ -793,11 +820,11 @@ export function resolveWeaponOutputs(network) {
       }
 
       if (mergerConsumers[row].length > 0) {
-        retainedShare[row] *= 0.5;
-        const share = 0.5 / mergerConsumers[row].length;
+        retainedShare[row] *= 1 - MERGER_PULL_SHARE;
+        const share = MERGER_PULL_SHARE / mergerConsumers[row].length;
         for (const targetRow of mergerConsumers[row]) {
           const mergerSlot = column.slots[targetRow];
-          const siphon = amplifySignal(scaleSignal(signal, share), 1.1, mergerSlot);
+          const siphon = amplifySignal(scaleSignal(signal, share), 1 + MERGER_BONUS_STEP, mergerSlot);
           localAdditions[targetRow].push(siphon);
           connections.push(
             buildConnection(
@@ -822,7 +849,7 @@ export function resolveWeaponOutputs(network) {
       markNode(nodes, columnIndex, row, current);
 
       const forwardCurrent = slot.relayMultiplier
-        ? amplifySignal(current, 1.1, slot)
+        ? amplifySignal(current, 1 + RELAY_BONUS_STEP, slot)
         : current;
 
       outgoingLists[row].push(forwardCurrent);
@@ -835,7 +862,7 @@ export function resolveWeaponOutputs(network) {
       );
 
       if (slot.upLink && row > 0) {
-        const upward = amplifySignal(current, 1.1, slot);
+        const upward = amplifySignal(current, 1 + LINK_BONUS_STEP, slot);
         outgoingLists[row - 1].push(cloneSignal(upward));
         connections.push(
           buildConnection(
@@ -847,7 +874,7 @@ export function resolveWeaponOutputs(network) {
       }
 
       if (slot.downLink && row < ROWS - 1) {
-        const downward = amplifySignal(current, 1.1, slot);
+        const downward = amplifySignal(current, 1 + LINK_BONUS_STEP, slot);
         outgoingLists[row + 1].push(cloneSignal(downward));
         connections.push(
           buildConnection(

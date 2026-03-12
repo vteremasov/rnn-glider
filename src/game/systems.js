@@ -153,6 +153,61 @@ function drawShip(ctx, x, y, scale = 1) {
   ctx.restore();
 }
 
+function drawGunChargeEffects(ctx, shipX, shipY, ship, outputs, signalTime) {
+  if (!ship || !outputs) {
+    return;
+  }
+
+  const chargeProgress = Math.min(1, ship.fireTimer / Math.max(0.001, ship.fireInterval));
+
+  for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
+    const stats = outputs[row];
+    if (!stats) {
+      continue;
+    }
+
+    const y = shipY + ship.gunOffsetsY[row];
+    const conduitStartX = shipX - 2;
+    const conduitEndX = shipX + SHIP.muzzleOffsetX - 6;
+    const color = bulletColor(stats);
+    const pulseColors = stats.buffColors.length > 0 ? stats.buffColors : [color];
+
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.18 + chargeProgress * 0.2;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(conduitStartX, y);
+    ctx.lineTo(conduitEndX, y);
+    ctx.stroke();
+
+    for (let pulseIndex = 0; pulseIndex < 3; pulseIndex += 1) {
+      const localProgress = Math.max(0, Math.min(1, chargeProgress * 1.25 - pulseIndex * 0.22));
+      if (localProgress <= 0) {
+        continue;
+      }
+
+      const eased = localProgress * localProgress;
+      const x = conduitStartX + (conduitEndX - conduitStartX) * eased;
+      ctx.fillStyle = pulseColors[pulseIndex % pulseColors.length];
+      ctx.globalAlpha = 0.35 + localProgress * 0.45;
+      ctx.beginPath();
+      ctx.arc(x, y, 2.5 + localProgress * 2.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const muzzleX = shipX + SHIP.muzzleOffsetX;
+    const muzzlePulse = 0.8 + Math.sin(signalTime * 7 + row * 0.8) * 0.2;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.25 + chargeProgress * 0.35;
+    ctx.beginPath();
+    ctx.arc(muzzleX, y, 5 + chargeProgress * 5 * muzzlePulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 1;
+  }
+}
+
 function wrapText(ctx, text, maxWidth) {
   const words = text.split(/\s+/);
   const lines = [];
@@ -1371,14 +1426,51 @@ export function createRenderSystem(ctx, canvas) {
 
       if (render.type === "ship") {
         drawShip(ctx, transform.x, transform.y, SHIP.renderScale);
+        const ship = world.getComponent(entity, "Ship");
+        drawGunChargeEffects(
+          ctx,
+          transform.x,
+          transform.y,
+          ship,
+          flow.outputs,
+          world.resources.signalTime,
+        );
       }
 
       if (render.type === "bullet") {
         const body = world.getComponent(entity, "CircleCollider");
+        const bullet = world.getComponent(entity, "Bullet");
+        const trailLength = 16 + Math.min(1, bullet.age / Math.max(0.001, BULLET.easeDuration)) * 34;
+        ctx.strokeStyle = render.color;
+        ctx.globalAlpha = 0.22;
+        ctx.lineWidth = body.radius * 2.4;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(transform.x - trailLength, transform.y);
+        ctx.lineTo(transform.x, transform.y);
+        ctx.stroke();
+
         ctx.fillStyle = render.color;
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath();
+        ctx.arc(transform.x, transform.y, body.radius + 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.globalAlpha = 1;
         ctx.beginPath();
         ctx.arc(transform.x, transform.y, body.radius, 0, Math.PI * 2);
         ctx.fill();
+
+        const accentColors = bullet.buffColors.filter((color) => color && color !== render.color).slice(0, 3);
+        for (let index = 0; index < accentColors.length; index += 1) {
+          const angle = world.resources.signalTime * 8 + index * 2.2 + bullet.row * 0.6;
+          const sparkX = transform.x + Math.cos(angle) * (body.radius + 4.5);
+          const sparkY = transform.y + Math.sin(angle) * (body.radius + 3.5);
+          ctx.fillStyle = accentColors[index];
+          ctx.beginPath();
+          ctx.arc(sparkX, sparkY, 1.8, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
       if (render.type === "enemy") {

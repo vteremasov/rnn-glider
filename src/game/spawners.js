@@ -59,6 +59,7 @@ export function createBullet(world, x, y, stats) {
     electric: stats?.electric ?? false,
     curse: stats?.curse ?? false,
     penetration: stats?.penetration ?? false,
+    buffColors: [...(stats?.buffColors ?? [])],
     row: stats?.row ?? 0,
     age: 0,
     baseSpeedX: BULLET.speedX,

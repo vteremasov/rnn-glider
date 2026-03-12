@@ -5,7 +5,7 @@ export const SHIP = {
   hp: 5,
   controlSpeed: 240,
   radius: 26,
-  fireInterval: 0.22,
+  fireInterval: 0.6,
   gunOffsetsY: [-34, -17, 0, 17, 34],
   muzzleOffsetX: 34,
   renderScale: 1.25,
