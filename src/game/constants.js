@@ -41,6 +41,13 @@ export const ENEMY = {
   maxSpeed: 54,
 };
 
+export const HEALTH_PICKUP = {
+  radius: 15,
+  heal: 1,
+  dropChance: 0.18,
+  driftSpeed: 54,
+};
+
 export const MINIBOSS = {
   baseRadius: 112,
   radiusPerTier: 28,

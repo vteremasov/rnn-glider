@@ -1,5 +1,5 @@
 import { BOSS, BULLET, ENEMY, ENEMY_BULLET, GAME_HEIGHT, GAME_WIDTH, LAYOUT, MINIBOSS, SHIP } from "./constants.js";
-import { countCompletedColumns, createWeaponNetwork } from "./weapon-network.js";
+import { RICOCHET_BOUNCES, countCompletedColumns, createWeaponNetwork } from "./weapon-network.js";
 
 function randomBetween(min, max) {
   return Math.random() * (max - min) + min;
@@ -19,6 +19,11 @@ function enemyColor(hp) {
     "#f07cff",
   ];
   return palette[Math.min(hp - 1, palette.length - 1)];
+}
+
+function getEnemyShape() {
+  const shapes = ["circle", "triangle", "square", "diamond", "hex"];
+  return shapes[Math.floor(Math.random() * shapes.length)];
 }
 
 function getMiniBossName(tier) {
@@ -70,10 +75,16 @@ export function createBullet(world, x, y, stats) {
     freeze: stats?.freeze ?? false,
     pushback: stats?.pushback ?? false,
     penetration: stats?.penetration ?? false,
+    split: stats?.split ?? false,
+    ricochet: stats?.ricochet ?? false,
+    splitRemaining: stats?.splitRemaining ?? (stats?.split ? 1 : 0),
+    bouncesLeft: stats?.bouncesLeft ?? (stats?.ricochet ? RICOCHET_BOUNCES : 0),
     buffColors: [...(stats?.buffColors ?? [])],
     row: stats?.row ?? 0,
     age: 0,
     baseSpeed: BULLET.speedX,
+    dirX: stats?.dirX ?? 0,
+    dirY: stats?.dirY ?? -1,
   });
   world.addComponent(bullet, "Render", {
     type: "bullet",
@@ -101,10 +112,10 @@ export function createEnemy(world) {
   const completedColumns = countCompletedColumns(world.resources.weaponNetwork);
   const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
   const isOpeningWave = completedColumns === 0 && minibossesDefeated === 0;
-  const lateTierNerf = isOpeningWave ? 1 : 0.9;
+  const lateTierNerf = isOpeningWave ? 1 : 0.78;
   const hpScale = 0.72 + completedColumns * 0.22 + minibossesDefeated * 0.45;
   const speedScale = 0.88 + completedColumns * 0.08 + minibossesDefeated * 0.12;
-  const radiusBonus = completedColumns * 2 + minibossesDefeated * 5;
+  const radiusBonus = completedColumns * 1 + minibossesDefeated * 2.5;
   const radius = randomBetween(ENEMY.minRadius + radiusBonus, ENEMY.maxRadius + radiusBonus);
   const speed =
     randomBetween(ENEMY.minSpeed, ENEMY.maxSpeed) *
@@ -145,7 +156,7 @@ export function createEnemy(world) {
     slowFactor: 0,
     freezeTimer: 0,
   });
-  world.addComponent(enemy, "Render", { type: "enemy", color: enemyColor(hp) });
+  world.addComponent(enemy, "Render", { type: "enemy", color: enemyColor(hp), shape: getEnemyShape() });
   return enemy;
 }
 

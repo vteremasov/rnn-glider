@@ -1,13 +1,16 @@
-import { BOSS, BULLET, ENEMY_BULLET, GAME_HEIGHT, GAME_WIDTH, LAYOUT, MINIBOSS, SHIP } from "./constants.js";
+import { BOSS, BULLET, ENEMY_BULLET, GAME_HEIGHT, GAME_WIDTH, HEALTH_PICKUP, LAYOUT, MINIBOSS, SHIP } from "./constants.js";
 import { createBoss, createBullet, createEnemy, createEnemyBullet, createMiniBoss, resetGame } from "./spawners.js";
 import {
   BASE_ENGINE_ENERGY,
+  BURN_DAMAGE_FACTOR,
+  CURSE_DAMAGE_FACTOR,
   FREEZE_DURATION,
   PUSHBACK_BASE,
   PUSHBACK_PER_DAMAGE,
   SLOW_DURATION,
   SLOW_FACTOR,
   SOURCE_ROW_ENERGY,
+  SPLIT_ANGLE_DEGREES,
   applyUpgradeToSelectedRow,
   beginSpecialUpgrade,
   beginUpgrade,
@@ -17,6 +20,24 @@ import {
   isNetworkComplete,
   resolveWeaponOutputs,
 } from "./weapon-network.js";
+
+const BURN_TICKS = 5;
+const CURSE_TICKS = 6;
+const TOOLTIP_WIDTH = 286;
+
+function getSlotLocalBonus(slot) {
+  const localAmp = (slot?.damageMultiplier ?? 1) * (slot?.specialMultiplier ?? 1);
+  const localFlat = slot?.filled ? 2 : 0;
+  return { localAmp, localFlat };
+}
+
+function getEffectSummary(slot, buffs) {
+  const effects = [...buffs];
+  if (effects.length === 0) {
+    return "None";
+  }
+  return effects.join(", ");
+}
 
 function circlesOverlap(a, ra, b, rb) {
   const dx = a.x - b.x;
@@ -75,16 +96,124 @@ function bulletColor(stats) {
 function createDamageText(world, x, y, damage) {
   const entity = world.createEntity();
   const magnitude = Math.max(1, Math.abs(damage));
+  const size = Math.min(40, 16 + Math.sqrt(magnitude) * 3.8);
+  const riseSpeed = Math.max(-72, -30 - Math.sqrt(magnitude) * 6.5);
   world.addComponent(entity, "Transform", { x, y });
   world.addComponent(entity, "DamageText", {
     value: `-${Math.round(magnitude)}`,
     life: 0.9,
     totalLife: 0.9,
-    size: Math.min(34, 16 + magnitude * 1.35),
+    size,
   });
-  world.addComponent(entity, "Velocity", { x: 0, y: -28 - magnitude * 1.2 });
+  world.addComponent(entity, "Velocity", { x: 0, y: riseSpeed });
   world.addComponent(entity, "Render", { type: "damageText", color: "#ffe6e6" });
   return entity;
+}
+
+function createHealthPickup(world, x, y) {
+  const entity = world.createEntity();
+  world.addComponent(entity, "Transform", { x, y });
+  world.addComponent(entity, "Velocity", { x: 0, y: HEALTH_PICKUP.driftSpeed });
+  world.addComponent(entity, "CircleCollider", { radius: HEALTH_PICKUP.radius });
+  world.addComponent(entity, "HealthPickup", { heal: HEALTH_PICKUP.heal });
+  world.addComponent(entity, "Render", { type: "healthPickup", color: "#9cffb2" });
+  return entity;
+}
+
+function bounceBulletOffWalls(transform, body, bullet) {
+  if (!bullet?.ricochet || (bullet.bouncesLeft ?? 0) <= 0) {
+    return false;
+  }
+
+  const battleLeft = LAYOUT.sidebarWidth + LAYOUT.battlePadding;
+  const battleRight = GAME_WIDTH - LAYOUT.battlePadding;
+  let bounced = false;
+
+  if (transform.x - body.radius <= battleLeft) {
+    transform.x = battleLeft + body.radius + 1;
+    bullet.dirX = Math.abs(bullet.dirX || 0.24);
+    bounced = true;
+  } else if (transform.x + body.radius >= battleRight) {
+    transform.x = battleRight - body.radius - 1;
+    bullet.dirX = -Math.abs(bullet.dirX || 0.24);
+    bounced = true;
+  }
+
+  if (transform.y - body.radius <= 0) {
+    transform.y = body.radius + 1;
+    bullet.dirY = Math.abs(bullet.dirY || 1);
+    bounced = true;
+  } else if (transform.y + body.radius >= GAME_HEIGHT) {
+    transform.y = GAME_HEIGHT - body.radius - 1;
+    bullet.dirY = -Math.abs(bullet.dirY || 1);
+    bounced = true;
+  }
+
+  if (bounced) {
+    const length = Math.hypot(bullet.dirX, bullet.dirY) || 1;
+    bullet.dirX /= length;
+    bullet.dirY /= length;
+    bullet.bouncesLeft -= 1;
+    bullet.damage *= 0.5;
+  }
+
+  return bounced;
+}
+
+function bounceBulletOffEnemy(bulletPos, bulletBody, bullet, enemyPos, enemyBody) {
+  if (!bullet?.ricochet || (bullet.bouncesLeft ?? 0) <= 0) {
+    return false;
+  }
+
+  const dx = bulletPos.x - enemyPos.x;
+  const dy = bulletPos.y - enemyPos.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const normalX = dx / length;
+  const normalY = dy / length;
+  const incomingX = bullet.dirX ?? 0;
+  const incomingY = bullet.dirY ?? -1;
+  const dot = incomingX * normalX + incomingY * normalY;
+
+  bullet.dirX = incomingX - 2 * dot * normalX;
+  bullet.dirY = incomingY - 2 * dot * normalY;
+  const nextLength = Math.hypot(bullet.dirX, bullet.dirY) || 1;
+  bullet.dirX /= nextLength;
+  bullet.dirY /= nextLength;
+  bulletPos.x = enemyPos.x + normalX * (enemyBody.radius + bulletBody.radius + 6);
+  bulletPos.y = enemyPos.y + normalY * (enemyBody.radius + bulletBody.radius + 6);
+  bullet.bouncesLeft -= 1;
+  bullet.damage *= 0.5;
+  return true;
+}
+
+function spawnSplitBullets(world, bullet, x, y) {
+  if (!bullet?.split || (bullet.splitRemaining ?? 0) <= 0) {
+    return;
+  }
+
+  const baseAngle = Math.atan2(bullet.dirY ?? -1, bullet.dirX ?? 0);
+  const splitAngle = (SPLIT_ANGLE_DEGREES * Math.PI) / 180;
+  for (const angleOffset of [-splitAngle, splitAngle]) {
+    const angle = baseAngle + angleOffset;
+    createBullet(world, x, y, {
+      damage: bullet.damage * 0.5,
+      fire: bullet.fire,
+      curse: bullet.curse,
+      slow: bullet.slow,
+      freeze: bullet.freeze,
+      pushback: bullet.pushback,
+      penetration: bullet.penetration,
+      split: bullet.split,
+      ricochet: bullet.ricochet,
+      splitRemaining: Math.max(0, (bullet.splitRemaining ?? 1) - 1),
+      bouncesLeft: bullet.bouncesLeft ?? 0,
+      buffColors: bullet.buffColors,
+      row: bullet.row,
+      color: mixColors(bullet.buffColors ?? [], "#dff9ff"),
+      dirX: Math.cos(angle),
+      dirY: Math.sin(angle),
+    });
+  }
 }
 
 function damageEnemy(world, enemyEntity, damage) {
@@ -118,6 +247,9 @@ function damageEnemy(world, enemyEntity, damage) {
       );
       world.resources.activeMinibossTier = 0;
       world.resources.pendingSpecialUpgrade = true;
+    }
+    if (!enemy.isBoss && !enemy.isMiniBoss && Math.random() < HEALTH_PICKUP.dropChance) {
+      createHealthPickup(world, transform.x, transform.y);
     }
     world.resources.score += Math.round(enemy.maxHp * scoreMultiplier);
     world.destroyEntity(enemyEntity);
@@ -164,6 +296,49 @@ function drawShip(ctx, x, y, scale = 1) {
     ctx.fillRect(offsetX - 2.5, -38, 5, 12);
   }
   ctx.restore();
+}
+
+function drawEnemyShape(ctx, shape, x, y, radius) {
+  ctx.beginPath();
+
+  if (shape === "triangle") {
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x - radius * 0.9, y + radius * 0.8);
+    ctx.lineTo(x + radius * 0.9, y + radius * 0.8);
+    ctx.closePath();
+    return;
+  }
+
+  if (shape === "square") {
+    ctx.rect(x - radius * 0.82, y - radius * 0.82, radius * 1.64, radius * 1.64);
+    return;
+  }
+
+  if (shape === "diamond") {
+    ctx.moveTo(x, y - radius);
+    ctx.lineTo(x - radius * 0.92, y);
+    ctx.lineTo(x, y + radius);
+    ctx.lineTo(x + radius * 0.92, y);
+    ctx.closePath();
+    return;
+  }
+
+  if (shape === "hex") {
+    for (let index = 0; index < 6; index += 1) {
+      const angle = -Math.PI / 2 + index * (Math.PI / 3);
+      const pointX = x + Math.cos(angle) * radius;
+      const pointY = y + Math.sin(angle) * radius;
+      if (index === 0) {
+        ctx.moveTo(pointX, pointY);
+      } else {
+        ctx.lineTo(pointX, pointY);
+      }
+    }
+    ctx.closePath();
+    return;
+  }
+
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
 }
 
 function drawGunChargeEffects(ctx, shipX, shipY, ship, outputs, signalTime) {
@@ -263,12 +438,15 @@ function mergeCycleOutputs(flows, rowCount) {
     const merged = {
       energy: 0,
       damage: 0,
+      flatDamage: 0,
       fire: false,
       curse: false,
       slow: false,
       freeze: false,
       pushback: false,
       penetration: false,
+      split: false,
+      ricochet: false,
       buffNames: [],
       buffShorts: [],
       buffColors: [],
@@ -277,12 +455,15 @@ function mergeCycleOutputs(flows, rowCount) {
     for (const output of outputs) {
       merged.energy = Math.max(merged.energy, output.energy ?? 0);
       merged.damage = Math.max(merged.damage, output.damage ?? 0);
+      merged.flatDamage = Math.max(merged.flatDamage, output.flatDamage ?? 0);
       merged.fire = merged.fire || Boolean(output.fire);
       merged.curse = merged.curse || Boolean(output.curse);
       merged.slow = merged.slow || Boolean(output.slow);
       merged.freeze = merged.freeze || Boolean(output.freeze);
       merged.pushback = merged.pushback || Boolean(output.pushback);
       merged.penetration = merged.penetration || Boolean(output.penetration);
+      merged.split = merged.split || Boolean(output.split);
+      merged.ricochet = merged.ricochet || Boolean(output.ricochet);
       pushUniqueValues(merged.buffNames, output.buffNames ?? []);
       pushUniqueValues(merged.buffShorts, output.buffShorts ?? []);
       pushUniqueValues(merged.buffColors, output.buffColors ?? []);
@@ -290,6 +471,87 @@ function mergeCycleOutputs(flows, rowCount) {
 
     return merged;
   });
+}
+
+function mergeFlowSet(flows, network) {
+  const nodes = Array.from({ length: network.columns.length }, () =>
+    Array.from({ length: network.rows }, () => ({
+      active: false,
+      energy: 0,
+      amp: 0,
+      flatDamage: 0,
+      damage: 0,
+      buffNames: [],
+      buffShorts: [],
+      buffColors: [],
+    })),
+  );
+  const connectionMap = new Map();
+
+  for (const flow of flows) {
+    for (let columnIndex = 0; columnIndex < flow.nodes.length; columnIndex += 1) {
+      for (let row = 0; row < flow.nodes[columnIndex].length; row += 1) {
+        const sourceNode = flow.nodes[columnIndex][row];
+        const targetNode = nodes[columnIndex][row];
+        if (!sourceNode.active) {
+          continue;
+        }
+
+        targetNode.active = true;
+        targetNode.energy = Math.max(targetNode.energy, sourceNode.energy ?? 0);
+        targetNode.amp = Math.max(targetNode.amp, sourceNode.amp ?? 0);
+        targetNode.flatDamage = Math.max(targetNode.flatDamage, sourceNode.flatDamage ?? 0);
+        targetNode.damage = Math.max(targetNode.damage, sourceNode.damage ?? 0);
+        pushUniqueValues(targetNode.buffNames, sourceNode.buffNames ?? []);
+        pushUniqueValues(targetNode.buffShorts, sourceNode.buffShorts ?? []);
+        pushUniqueValues(targetNode.buffColors, sourceNode.buffColors ?? []);
+      }
+    }
+
+    for (const connection of flow.connections) {
+      const existing = connectionMap.get(connection.id);
+      if (!existing) {
+        connectionMap.set(connection.id, {
+          ...connection,
+          active: Boolean(connection.active),
+          buffColors: [...(connection.buffColors ?? [])],
+        });
+        continue;
+      }
+
+      existing.active = existing.active || Boolean(connection.active);
+      pushUniqueValues(existing.buffColors, connection.buffColors ?? []);
+    }
+  }
+
+  return {
+    nodes,
+    connections: [...connectionMap.values()],
+    outputs: mergeCycleOutputs(flows, network.rows),
+  };
+}
+
+function resolveFocusedWeaponFlow(network, focusedNode) {
+  const candidateFlows = Array.from({ length: network.rows }, (_, dispatchRow) =>
+    resolveWeaponOutputs(network, { dispatchRow }),
+  );
+  const matchingFlows = candidateFlows.filter((flow) =>
+    flow.nodes[focusedNode.columnIndex]?.[focusedNode.row]?.active,
+  );
+
+  if (matchingFlows.length === 0) {
+    return {
+      ...resolveWeaponOutputs(network, {
+        injectedNode: focusedNode,
+      }),
+      projected: true,
+    };
+  }
+
+  return {
+    ...mergeFlowSet(matchingFlows, network),
+    projected: false,
+  };
 }
 
 function getDisplayedDispatchState(world, network = world.resources.weaponNetwork) {
@@ -524,13 +786,25 @@ function drawVictoryOverlay(ctx, canvas, world) {
   const network = world.resources.weaponNetwork;
   const flow = resolveDisplayedWeaponFlow(world, network);
   const panelX = 110;
-  const panelY = 240;
+  const panelY = 188;
   const panelWidth = canvas.width - 220;
-  const panelHeight = 470;
-  const panelCenterY = panelY + panelHeight * 0.5;
-  const rowSpacing = 68;
-  const shipEntity = world.query("Ship", "Transform")[0];
-  const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : null;
+  const panelHeight = 620;
+  const modelPanelWidth = Math.max(640, Math.min(860, panelWidth * 0.58));
+  const rightPanelWidth = panelWidth - modelPanelWidth - 22;
+  const modelX = panelX + 18;
+  const modelY = panelY + 18;
+  const modelWidth = modelPanelWidth - 36;
+  const modelHeight = panelHeight - 36;
+  const modelInset = 10;
+  const rightX = modelX + modelPanelWidth + 4;
+  const rightY = modelY;
+  const hoverInfo = {};
+  const modelMetrics = getFittedGridMetrics(network, modelWidth, modelHeight, {
+    rowSpacing: 68,
+    columnSpacing: 102,
+    slotRadius: 24,
+    gunOffsetX: 108,
+  });
 
   ctx.fillStyle = "rgba(6, 18, 10, 0.62)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -550,43 +824,78 @@ function drawVictoryOverlay(ctx, canvas, world) {
   ctx.fill();
   ctx.stroke();
 
-  drawShip(ctx, panelX + 190, panelCenterY, SHIP.upgradeRenderScale);
+  ctx.fillStyle = "rgba(10, 18, 34, 0.95)";
+  ctx.beginPath();
+  ctx.roundRect(modelX, modelY, modelWidth, modelHeight, 18);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(rightX, rightY, rightPanelWidth, modelHeight, 18);
+  ctx.fill();
+
+  const victoryModelTranslateX = modelX + 34;
+  const victoryModelTranslateY = modelY + modelHeight - 18;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(modelX + modelInset, modelY + modelInset, modelWidth - modelInset * 2, modelHeight - modelInset * 2);
+  ctx.clip();
+  ctx.translate(victoryModelTranslateX, victoryModelTranslateY);
+  ctx.rotate(-Math.PI / 2);
+  const cycleSpanX =
+    network.columns.length * modelMetrics.columnSpacing + 120 + modelMetrics.gunOffsetX;
+  const centeredFrontX = modelHeight * 0.5 + (cycleSpanX - modelMetrics.gunOffsetX) * 0.5 - 16;
   drawWeaponGrid(ctx, world, {
     flow,
-    scaffoldNetwork: previewNetwork,
+    focusNetwork: network,
+    focusOnHover: true,
+    hoverInfoTarget: hoverInfo,
     signalTime: world.resources.signalTime,
     signalProgress: flow.signalProgress,
-    frontX: panelX + panelWidth - 260,
-    centerY: panelCenterY,
-    rowSpacing,
-    columnSpacing: 102,
-    slotRadius: 24,
+    frontX: centeredFrontX,
+    centerY: modelWidth * 0.5 - 8,
+    rowSpacing: modelMetrics.rowSpacing,
+    columnSpacing: modelMetrics.columnSpacing,
+    slotRadius: modelMetrics.slotRadius,
     lineWidth: 3,
     labelSize: 14,
     buffSize: 11,
     showBuffLabels: true,
-    gunOffsetX: 108,
+    showCoreLabels: false,
+    gunOffsetX: modelMetrics.gunOffsetX,
+    hoverPoint: getRotatedHoverPoint(
+      world.resources.pointer,
+      victoryModelTranslateX,
+      victoryModelTranslateY,
+    ),
   });
+  ctx.restore();
+  drawNeuronTooltip(ctx, world.resources.pointer, hoverInfo.info);
 
-  if (ship) {
-    ctx.textAlign = "left";
-    ctx.textBaseline = "middle";
-    for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
-      const output = flow.outputs[row];
-      const y = panelCenterY + (row - 2) * rowSpacing;
-      const damage = output ? output.damage : 0;
-      ctx.fillStyle = output ? bulletColor(output) : "#6e7e9f";
-      ctx.font = output ? "bold 18px Trebuchet MS, sans-serif" : "16px Trebuchet MS, sans-serif";
-      ctx.fillText(`DMG ${damage}`, panelX + 340, y);
-    }
-  }
+  const burstOutputs = flow.outputs.filter(Boolean);
+  const primaryOutput = burstOutputs[0] ?? null;
+  ctx.fillStyle = "#f3f7ff";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.font = "bold 24px Trebuchet MS, sans-serif";
+  ctx.fillText("Final Model", rightX + 18, rightY + 18);
+  ctx.font = "16px Trebuchet MS, sans-serif";
+  ctx.fillStyle = "#dbe8ff";
+  ctx.fillText("Hover a neuron to inspect its path and effects.", rightX + 18, rightY + 58);
+  ctx.fillText(`Columns: ${network.columns.length}/${network.maxColumns}`, rightX + 18, rightY + 90);
+  ctx.fillText(`Engine: ${(BASE_ENGINE_ENERGY * (network.engineMultiplier ?? 1)).toFixed(1)}`, rightX + 18, rightY + 114);
+  ctx.fillText(`Burst shots: ${burstOutputs.length}`, rightX + 18, rightY + 138);
+  ctx.fillText(
+    `Primary output: ${primaryOutput ? primaryOutput.damage.toFixed(1) : "0.0"}`,
+    rightX + 18,
+    rightY + 162,
+  );
+  ctx.fillText(`Score: ${world.resources.score}`, rightX + 18, rightY + 186);
 
   ctx.fillStyle = "#dce8ff";
   ctx.textAlign = "center";
   ctx.font = "18px Trebuchet MS, sans-serif";
-  ctx.fillText(`Score ${world.resources.score}`, canvas.width * 0.5, panelY + panelHeight + 38);
+  ctx.fillText(`Score ${world.resources.score}`, canvas.width * 0.5, panelY + panelHeight + 34);
   ctx.font = "20px Trebuchet MS, sans-serif";
-  ctx.fillText("Press R to restart or keep flying.", canvas.width * 0.5, panelY + panelHeight + 76);
+  ctx.fillText("Press R to restart or hover the model to inspect signal paths.", canvas.width * 0.5, panelY + panelHeight + 72);
 }
 
 function drawGunEndpoint(ctx, x, y, scale, activeColor) {
@@ -612,12 +921,48 @@ function drawGunEndpoint(ctx, x, y, scale, activeColor) {
   ctx.restore();
 }
 
+function drawNeuronTooltip(ctx, pointer, info) {
+  if (!pointer?.active || !info) {
+    return;
+  }
+
+  const periodicLines = info.periodic?.length ? info.periodic : ["Periodic: none"];
+  const panelHeight = 132 + periodicLines.length * 18;
+  const x = Math.min(ctx.canvas.width - TOOLTIP_WIDTH - 16, pointer.x + 18);
+  const y = Math.min(ctx.canvas.height - panelHeight - 16, pointer.y + 18);
+
+  ctx.save();
+  ctx.fillStyle = "rgba(8, 14, 30, 0.94)";
+  ctx.strokeStyle = info.color ?? "rgba(149, 189, 255, 0.35)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(x, y, TOOLTIP_WIDTH, panelHeight, 12);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillStyle = "#f3f7ff";
+  ctx.font = "bold 15px Trebuchet MS, sans-serif";
+  ctx.fillText(info.title, x + 12, y + 10);
+  ctx.font = "14px Trebuchet MS, sans-serif";
+  ctx.fillText(`Input: ${info.inputText}`, x + 12, y + 34);
+  ctx.fillText(`Local: ${info.localText}`, x + 12, y + 54);
+  ctx.fillText(`Output: ${info.damageText}`, x + 12, y + 74);
+  ctx.fillText(`Effects: ${info.effectsText}`, x + 12, y + 94);
+  for (let index = 0; index < periodicLines.length; index += 1) {
+    ctx.fillText(periodicLines[index], x + 12, y + 114 + index * 18);
+  }
+  ctx.restore();
+}
+
 function drawWeaponGrid(ctx, world, layout) {
   const network = world.resources.weaponNetwork;
   const scaffoldNetwork = layout.scaffoldNetwork ?? network;
   const flow = layout.flow;
   const signalTime = layout.signalTime ?? 0;
   const signalProgress = layout.signalProgress ?? null;
+  const previewPulseColor = layout.previewPulseColor ?? "#fff4c4";
   const changedConnections = layout.changedConnections ?? new Set();
   const changedNodes = layout.changedNodes ?? new Set();
   const selectedRow =
@@ -696,9 +1041,64 @@ function drawWeaponGrid(ctx, world, layout) {
   }
 
   const hoveredNode = getHoveredGridNode(nodePositions, layout.hoverPoint ?? null, slotRadius);
+  const focusedNode = hoveredNode ?? (
+    network.upgrade.active && network.upgrade.step === "slot"
+      ? { columnIndex: selectedColumn, row: selectedRow }
+      : null
+  );
+  const activeFlow =
+    layout.focusOnHover && focusedNode
+      ? {
+          ...resolveFocusedWeaponFlow(layout.focusNetwork ?? scaffoldNetwork, focusedNode),
+          signalProgress,
+        }
+      : flow;
+  const pulseConnections =
+    activeFlow.pulseConnections ??
+    activeFlow.connections
+      .filter((connection) => connection.active)
+      .map((connection) => ({
+        ...connection,
+        phaseOffset: 0,
+      }));
 
   gunPositions.set(0, { x: gunX, y: baseY });
   const scaffoldColor = "rgba(142, 164, 202, 0.22)";
+  const previewPulseSegments = [];
+
+  if (hoveredNode && layout.hoverInfoTarget) {
+    const slot = scaffoldNetwork.columns[hoveredNode.columnIndex]?.slots[hoveredNode.row];
+    const nodeFlow = activeFlow.nodes[hoveredNode.columnIndex]?.[hoveredNode.row];
+    const buffs = [];
+    if (slot?.buffShort) {
+      buffs.push(slot.buffShort);
+    }
+    if ((slot?.specialMultiplier ?? 1) > 1.001) {
+      buffs.push(`EMP x${slot.specialMultiplier.toFixed(2)}`);
+    }
+    const damage = nodeFlow?.damage ?? 0;
+    const energy = nodeFlow?.energy ?? 0;
+    const { localAmp, localFlat } = getSlotLocalBonus(slot);
+    const periodic = [];
+    if (nodeFlow?.active && (slot?.alwaysFire || nodeFlow.buffShorts?.includes("FIRE"))) {
+      const burnTick = Math.max(1, Math.round(damage * BURN_DAMAGE_FACTOR));
+      periodic.push(`Burn: ${burnTick}/tick x ${BURN_TICKS} = ${burnTick * BURN_TICKS}`);
+    }
+    if (nodeFlow?.active && (slot?.alwaysCurse || nodeFlow.buffShorts?.includes("CURSE"))) {
+      const curseTick = Math.max(1, Math.round(damage * CURSE_DAMAGE_FACTOR));
+      periodic.push(`Curse: ${curseTick}/tick x ${CURSE_TICKS} = ${curseTick * CURSE_TICKS}`);
+    }
+    layout.hoverInfoTarget.info = {
+      title: `L${hoveredNode.columnIndex + 1} R${hoveredNode.row + 1}`,
+      damageText: nodeFlow?.active ? nodeFlow.damage.toFixed(1) : "0.0",
+      inputText: nodeFlow?.active ? energy.toFixed(1) : "0.0",
+      localText: `x${localAmp.toFixed(2)} +${localFlat.toFixed(1)}`,
+      effectsText: getEffectSummary(slot, buffs),
+      buffs,
+      periodic,
+      color: slot?.buffColor ?? (nodeFlow?.buffColors?.[0] ?? "#9bc8ff"),
+    };
+  }
 
   for (let row = 0; row < network.rows; row += 1) {
     const from = getEndpointPosition({ type: "engine", row: 0 });
@@ -800,7 +1200,85 @@ function drawWeaponGrid(ctx, world, layout) {
     }
   }
 
-  for (const connection of flow.connections) {
+  if (focusedNode) {
+    const previewColor = previewPulseColor;
+    const previewColumn = scaffoldNetwork.columns[focusedNode.columnIndex];
+    const previewSlot = previewColumn?.slots[focusedNode.row];
+    const from = getColumnPosition(focusedNode.columnIndex, focusedNode.row);
+
+    if (previewSlot && from) {
+      for (const sourceRow of collectLocalMergerSources(previewSlot, focusedNode.row, network.rows)) {
+        const source = getColumnPosition(focusedNode.columnIndex, sourceRow);
+        if (!source) {
+          continue;
+        }
+        drawConnectionStroke(
+          ctx,
+          source,
+          from,
+          previewColor,
+          (layout.lineWidth ?? 2) + 0.25,
+          slotRadius,
+        );
+        previewPulseSegments.push({ from: source, to: from });
+      }
+
+      for (const targetRow of collectLocalDividerTargets(previewSlot, focusedNode.row, network.rows)) {
+        const to = getColumnPosition(focusedNode.columnIndex, targetRow);
+        if (!to) {
+          continue;
+        }
+        drawConnectionStroke(
+          ctx,
+          from,
+          to,
+          previewColor,
+          (layout.lineWidth ?? 2) + 0.25,
+          slotRadius,
+        );
+        previewPulseSegments.push({ from, to });
+      }
+
+      for (const targetRow of collectOutgoingRows(previewSlot, focusedNode.row, network.rows)) {
+        const to =
+          focusedNode.columnIndex > 0
+            ? getColumnPosition(focusedNode.columnIndex - 1, targetRow)
+            : gunPositions.get(0);
+        if (!to) {
+          continue;
+        }
+        drawConnectionStroke(
+          ctx,
+          from,
+          to,
+          previewColor,
+          (layout.lineWidth ?? 2) + 0.25,
+          slotRadius,
+        );
+        previewPulseSegments.push({ from, to });
+      }
+
+      if (layout.previewFocusPulses) {
+        const incomingSource =
+          focusedNode.columnIndex < scaffoldNetwork.columns.length - 1
+            ? getColumnPosition(focusedNode.columnIndex + 1, focusedNode.row)
+            : getEndpointPosition({ type: "engine", row: 0 });
+        if (incomingSource) {
+          drawConnectionStroke(
+            ctx,
+            incomingSource,
+            from,
+            previewColor,
+            (layout.lineWidth ?? 2) + 0.25,
+            slotRadius,
+          );
+          previewPulseSegments.push({ from: incomingSource, to: from });
+        }
+      }
+    }
+  }
+
+  for (const connection of activeFlow.connections) {
     if (!connection.active) {
       continue;
     }
@@ -822,7 +1300,7 @@ function drawWeaponGrid(ctx, world, layout) {
     );
 
     const pulseSources =
-      flow.pulseConnections?.filter((pulse) => pulse.id === connection.id) ??
+      pulseConnections.filter((pulse) => pulse.id === connection.id) ??
       [{ ...connection, phaseOffset: 0 }];
 
     for (const pulse of pulseSources) {
@@ -848,6 +1326,19 @@ function drawWeaponGrid(ctx, world, layout) {
     ctx.globalAlpha = 1;
   }
 
+  if (layout.previewFocusPulses && previewPulseSegments.length > 0) {
+    previewPulseSegments.forEach((segment, index) => {
+      const travel = (signalTime * 1.15 + index * 0.17) % 1;
+      const pulsePoint = getConnectionPulsePoint(segment.from, segment.to, travel, slotRadius);
+      ctx.fillStyle = previewPulseColor;
+      ctx.globalAlpha = 0.82;
+      ctx.beginPath();
+      ctx.arc(pulsePoint.x, pulsePoint.y, 3.4, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+  }
+
   for (let columnIndex = 0; columnIndex < network.columns.length; columnIndex += 1) {
     const column = network.columns[columnIndex];
     const x = frontX - columnIndex * columnSpacing;
@@ -855,7 +1346,7 @@ function drawWeaponGrid(ctx, world, layout) {
     for (let row = 0; row < column.slots.length; row += 1) {
       const y = baseY + (row - 2) * rowSpacing;
       const slot = column.slots[row];
-      const nodeFlow = flow.nodes[columnIndex]?.[row];
+      const nodeFlow = activeFlow.nodes[columnIndex]?.[row];
       const isSelectable =
         network.upgrade.active &&
         network.upgrade.step === "slot" &&
@@ -961,6 +1452,17 @@ function drawWeaponGrid(ctx, world, layout) {
         ctx.fillText(slot.filled ? slot.buffShort : columnIndex === 0 ? "G" : String(slot.baseEnergy), x, y);
       }
 
+      if (nodeFlow?.active && layout.showNodeStats !== false) {
+        const { localAmp, localFlat } = getSlotLocalBonus(slot);
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#f5fbff";
+        ctx.font = `bold ${Math.max(9, Math.round((layout.labelSize ?? 11) * 0.9))}px Trebuchet MS, sans-serif`;
+        ctx.fillText(`${nodeFlow.damage.toFixed(1)}`, x, y - slotRadius - 14);
+        ctx.fillStyle = "rgba(224, 238, 255, 0.92)";
+        ctx.font = `${Math.max(8, Math.round((layout.labelSize ?? 11) * 0.78))}px Trebuchet MS, sans-serif`;
+        ctx.fillText(`x${localAmp.toFixed(2)} +${localFlat}`, x, y + slotRadius + 28);
+      }
+
       if (slot.filled && layout.showBuffLabels) {
         ctx.fillStyle = "#dce8ff";
         ctx.font = `${layout.buffSize ?? 10}px Trebuchet MS, sans-serif`;
@@ -970,7 +1472,7 @@ function drawWeaponGrid(ctx, world, layout) {
   }
 
   const gunPos = gunPositions.get(0);
-  const activeOutputs = flow.outputs.filter(Boolean);
+  const activeOutputs = activeFlow.outputs.filter(Boolean);
   const gunColor =
     activeOutputs.length > 0
       ? mixColors(activeOutputs.flatMap((output) => output.buffColors ?? []), bulletColor(activeOutputs[0]))
@@ -1042,6 +1544,7 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   const cardHeight = Math.max(128, Math.min(168, (modelHeight - 152) / 3));
   const cardGap = 16;
   const cardsY = rightY + 94;
+  const hoverInfo = {};
   const modelMetrics = getFittedGridMetrics(network, modelWidth, modelHeight, {
     rowSpacing: 68,
     columnSpacing: 102,
@@ -1142,6 +1645,12 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   const centeredFrontX = modelHeight * 0.5 + (cycleSpanX - modelMetrics.gunOffsetX) * 0.5 - 16;
   drawWeaponGrid(ctx, world, {
     flow,
+    scaffoldNetwork: previewNetwork,
+    focusNetwork: previewNetwork,
+    focusOnHover: upgrade.step === "slot",
+    hoverInfoTarget: hoverInfo,
+    previewFocusPulses: true,
+    previewPulseColor: upgrade.pendingCard?.color ?? "#fff4c4",
     signalTime: world.resources.signalTime,
     signalProgress: flow.signalProgress,
     changedConnections: changeSet.changedConnectionIds,
@@ -1164,6 +1673,7 @@ function drawUpgradeOverlay(ctx, canvas, world) {
     ),
   });
   ctx.restore();
+  drawNeuronTooltip(ctx, world.resources.pointer, hoverInfo.info);
 
   const shipEntity = world.query("Ship", "Transform")[0];
   const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : null;
@@ -1308,11 +1818,11 @@ export function createEnemySpawnSystem() {
     const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
     const isOpeningWave = completedColumns === 0 && minibossesDefeated === 0;
     const spawnInterval = Math.max(
-      isOpeningWave ? 2.15 : 0.7,
+      isOpeningWave ? 2.15 : 0.95,
       world.resources.enemySpawnInterval -
-        completedColumns * 0.015 -
-        minibossesDefeated * 0.04 +
-        (isOpeningWave ? 1.45 : 0.38),
+        completedColumns * 0.008 -
+        minibossesDefeated * 0.025 +
+        (isOpeningWave ? 1.45 : 0.52),
     );
 
     world.resources.enemySpawnTimer += dt;
@@ -1408,12 +1918,19 @@ export function movementSystem(world, dt) {
       const eased = progress * progress;
       const speedFactor =
         BULLET.startSpeedFactor + (1 - BULLET.startSpeedFactor) * eased;
-      velocity.x = 0;
-      velocity.y = -bullet.baseSpeed * speedFactor;
+      const dirLength = Math.hypot(bullet.dirX ?? 0, bullet.dirY ?? -1) || 1;
+      bullet.dirX = (bullet.dirX ?? 0) / dirLength;
+      bullet.dirY = (bullet.dirY ?? -1) / dirLength;
+      velocity.x = bullet.dirX * bullet.baseSpeed * speedFactor;
+      velocity.y = bullet.dirY * bullet.baseSpeed * speedFactor;
     }
 
     transform.x += velocity.x * dt;
     transform.y += velocity.y * dt;
+
+    if (bullet) {
+      bounceBulletOffWalls(transform, world.getComponent(entity, "CircleCollider"), bullet);
+    }
   }
 }
 
@@ -1427,9 +1944,14 @@ export function enemyStatusSystem(world, dt) {
     if (enemy.burnTicks > 0) {
       enemy.burnTimer -= dt;
       if (enemy.burnTimer <= 0) {
-        enemy.burnTimer = 0.42;
+        enemy.burnTimer = 0.5;
         enemy.burnTicks -= 1;
         damageEnemy(world, entity, enemy.burnDamage || 1);
+        if (enemy.burnTicks <= 0) {
+          enemy.burnTicks = 0;
+          enemy.burnTimer = 0;
+          enemy.burnDamage = 0;
+        }
       }
     }
 
@@ -1440,9 +1962,14 @@ export function enemyStatusSystem(world, dt) {
     if (enemy.curseTicks > 0) {
       enemy.curseTimer -= dt;
       if (enemy.curseTimer <= 0) {
-        enemy.curseTimer = 0.55;
+        enemy.curseTimer = 0.65;
         enemy.curseTicks -= 1;
         damageEnemy(world, entity, enemy.curseDamage || 1);
+        if (enemy.curseTicks <= 0) {
+          enemy.curseTicks = 0;
+          enemy.curseTimer = 0;
+          enemy.curseDamage = 0;
+        }
       }
     }
 
@@ -1495,22 +2022,22 @@ export function collisionSystem(world) {
 
       if (world.entities.has(enemyEntity) && bullet.fire) {
         const enemy = world.getComponent(enemyEntity, "Enemy");
-        enemy.burnTicks = Math.max(enemy.burnTicks, 3);
-        enemy.burnTimer = 0.42;
-        enemy.burnDamage = Math.max(
-          enemy.burnDamage,
-          Math.max(1, Math.round(bullet.damage * 0.2)),
-        );
+        if (enemy.burnTicks <= 0) {
+          enemy.burnTimer = 0.5;
+          enemy.burnDamage = 0;
+        }
+        enemy.burnTicks += BURN_TICKS;
+        enemy.burnDamage += Math.max(1, Math.round(bullet.damage * BURN_DAMAGE_FACTOR));
       }
 
       if (world.entities.has(enemyEntity) && bullet.curse) {
         const enemy = world.getComponent(enemyEntity, "Enemy");
-        enemy.curseTicks = Math.max(enemy.curseTicks, 4);
-        enemy.curseTimer = 0.55;
-        enemy.curseDamage = Math.max(
-          enemy.curseDamage,
-          Math.max(1, Math.round(bullet.damage * 0.16)),
-        );
+        if (enemy.curseTicks <= 0) {
+          enemy.curseTimer = 0.65;
+          enemy.curseDamage = 0;
+        }
+        enemy.curseTicks += CURSE_TICKS;
+        enemy.curseDamage += Math.max(1, Math.round(bullet.damage * CURSE_DAMAGE_FACTOR));
       }
 
       if (world.entities.has(enemyEntity) && bullet.slow) {
@@ -1532,7 +2059,12 @@ export function collisionSystem(world) {
         enemyPos.y = Math.max(-enemyBody.radius * 0.6, enemyPos.y - pushDistance);
       }
 
-      if (bullet.penetration) {
+      if (bullet.split && (bullet.splitRemaining ?? 0) > 0) {
+        spawnSplitBullets(world, bullet, bulletPos.x, enemyPos.y - enemyBody.radius - bulletBody.radius - 6);
+        world.destroyEntity(bulletEntity);
+      } else if (bullet.ricochet && (bullet.bouncesLeft ?? 0) > 0) {
+        bounceBulletOffEnemy(bulletPos, bulletBody, bullet, enemyPos, enemyBody);
+      } else if (bullet.penetration) {
         bulletPos.y = enemyPos.y - enemyBody.radius - bulletBody.radius - 4;
       } else {
         world.destroyEntity(bulletEntity);
@@ -1549,6 +2081,23 @@ export function collisionSystem(world) {
   const shipPos = world.getComponent(shipEntity, "Transform");
   const shipBody = world.getComponent(shipEntity, "CircleCollider");
   const ship = world.getComponent(shipEntity, "Ship");
+
+  for (const pickupEntity of world.query("HealthPickup", "Transform", "CircleCollider")) {
+    const pickupPos = world.getComponent(pickupEntity, "Transform");
+    const pickupBody = world.getComponent(pickupEntity, "CircleCollider");
+    const pickup = world.getComponent(pickupEntity, "HealthPickup");
+    if (!circlesOverlap(shipPos, shipBody.radius, pickupPos, pickupBody.radius)) {
+      continue;
+    }
+
+    if (ship.hp >= ship.maxHp) {
+      continue;
+    }
+
+    ship.hp = Math.min(ship.maxHp, ship.hp + (pickup.heal ?? HEALTH_PICKUP.heal));
+    world.destroyEntity(pickupEntity);
+    break;
+  }
 
   if (ship.contactCooldown <= 0) {
     for (const bulletEntity of world.query("EnemyBullet", "Transform", "CircleCollider")) {
@@ -1635,6 +2184,20 @@ export function cleanupSystem(world) {
   }
 
   for (const entity of world.query("Enemy", "Transform")) {
+    const { x, y } = world.getComponent(entity, "Transform");
+    const body = world.getComponent(entity, "CircleCollider");
+    const radius = body?.radius ?? 0;
+    if (
+      x > GAME_WIDTH + radius + margin ||
+      x < -radius - margin ||
+      y < -radius - margin ||
+      y > GAME_HEIGHT + radius + margin
+    ) {
+      world.destroyEntity(entity);
+    }
+  }
+
+  for (const entity of world.query("HealthPickup", "Transform")) {
     const { x, y } = world.getComponent(entity, "Transform");
     const body = world.getComponent(entity, "CircleCollider");
     const radius = body?.radius ?? 0;
@@ -1764,12 +2327,15 @@ export function createRenderSystem(ctx, canvas) {
         const body = world.getComponent(entity, "CircleCollider");
         const bullet = world.getComponent(entity, "Bullet");
         const trailLength = 16 + Math.min(1, bullet.age / Math.max(0.001, BULLET.easeDuration)) * 34;
+        const dirLength = Math.hypot(bullet.dirX ?? 0, bullet.dirY ?? -1) || 1;
+        const dirX = (bullet.dirX ?? 0) / dirLength;
+        const dirY = (bullet.dirY ?? -1) / dirLength;
         ctx.strokeStyle = render.color;
         ctx.globalAlpha = 0.22;
         ctx.lineWidth = body.radius * 2.4;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(transform.x, transform.y + trailLength);
+        ctx.moveTo(transform.x - dirX * trailLength, transform.y - dirY * trailLength);
         ctx.lineTo(transform.x, transform.y);
         ctx.stroke();
 
@@ -1809,12 +2375,51 @@ export function createRenderSystem(ctx, canvas) {
         ctx.fill();
       }
 
+      if (render.type === "healthPickup") {
+        const body = world.getComponent(entity, "CircleCollider");
+        const pulse = 0.92 + Math.sin(world.resources.signalTime * 5.5 + transform.y * 0.01) * 0.08;
+        ctx.fillStyle = "rgba(156, 255, 178, 0.22)";
+        ctx.beginPath();
+        ctx.arc(transform.x, transform.y, body.radius + 6 * pulse, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#9cffb2";
+        ctx.beginPath();
+        ctx.arc(
+          transform.x - body.radius * 0.36,
+          transform.y - body.radius * 0.08,
+          body.radius * 0.46,
+          0,
+          Math.PI * 2,
+        );
+        ctx.arc(
+          transform.x + body.radius * 0.36,
+          transform.y - body.radius * 0.08,
+          body.radius * 0.46,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(transform.x - body.radius * 0.88, transform.y + body.radius * 0.04);
+        ctx.lineTo(transform.x, transform.y + body.radius * 1.08);
+        ctx.lineTo(transform.x + body.radius * 0.88, transform.y + body.radius * 0.04);
+        ctx.closePath();
+        ctx.fill();
+      }
+
       if (render.type === "enemy") {
         const body = world.getComponent(entity, "CircleCollider");
         const enemy = world.getComponent(entity, "Enemy");
         ctx.fillStyle = render.color;
         ctx.beginPath();
-        ctx.arc(transform.x, transform.y, body.radius, 0, Math.PI * 2);
+        drawEnemyShape(
+          ctx,
+          enemy.isBoss || enemy.isMiniBoss ? "circle" : render.shape,
+          transform.x,
+          transform.y,
+          body.radius,
+        );
         ctx.fill();
 
         if (enemy.isBoss) {
@@ -1833,12 +2438,12 @@ export function createRenderSystem(ctx, canvas) {
           ctx.strokeStyle = mixColors(debuffColors, "#f1f6ff");
           ctx.lineWidth = enemy.isBoss ? 10 : enemy.isMiniBoss ? 7 : 4;
           ctx.beginPath();
-          ctx.arc(
+          drawEnemyShape(
+            ctx,
+            enemy.isBoss || enemy.isMiniBoss ? "circle" : render.shape,
             transform.x,
             transform.y,
             body.radius + (enemy.isBoss ? 9 : enemy.isMiniBoss ? 7 : 5),
-            0,
-            Math.PI * 2,
           );
           ctx.stroke();
         }
@@ -1923,6 +2528,7 @@ export function createRenderSystem(ctx, canvas) {
 
     const mainModelTranslateX = panelPadding + 18;
     const mainModelTranslateY = canvas.height - panelPadding + 30;
+    const hoverInfo = {};
     ctx.save();
     ctx.beginPath();
     ctx.rect(panelPadding, modelTop, modelWidth, modelHeight);
@@ -1931,6 +2537,7 @@ export function createRenderSystem(ctx, canvas) {
     ctx.rotate(-Math.PI / 2);
     drawWeaponGrid(ctx, world, {
       flow,
+      hoverInfoTarget: hoverInfo,
       signalTime: world.resources.signalTime,
       signalProgress: flow.signalProgress,
       frontX: modelHeight - (mainModelMetrics.gunOffsetX + 10),
@@ -1950,6 +2557,7 @@ export function createRenderSystem(ctx, canvas) {
       ),
     });
     ctx.restore();
+    drawNeuronTooltip(ctx, world.resources.pointer, hoverInfo.info);
 
     const bossEntity = getBossEntity(world);
     const miniBossEntity = getMiniBossEntity(world);

@@ -1,15 +1,18 @@
 const ROWS = 5;
 const MAX_COLUMNS = 5;
-const INITIAL_UPGRADE_COST = 50;
-const UPGRADE_COST_GROWTH = 1.1;
+const INITIAL_UPGRADE_COST = 70;
+const UPGRADE_COST_GROWTH = 1.25;
 export const BASE_ENGINE_ENERGY = 25;
 export const SOURCE_ROW_ENERGY = BASE_ENGINE_ENERGY / ROWS;
 const ENGINE_OVERCLOCK_STEP = 0.1;
 const SPECIAL_EMPOWER_STEP = 0.1;
 const MAX_SPECIAL_MULTIPLIER = 1.6;
-const LOCAL_MULTIPLIER_STEP = 0.1;
 const OVERDRIVE_STEP = 0.35;
-const BURN_DAMAGE_FACTOR = 0.2;
+export const BURN_DAMAGE_FACTOR = 0.2;
+export const CURSE_DAMAGE_FACTOR = 0.16;
+export const UPGRADE_FLAT_DAMAGE = 2;
+export const SPLIT_ANGLE_DEGREES = 45;
+export const RICOCHET_BOUNCES = 5;
 const DIVIDER_SPLIT_SHARE = 0.5;
 const DIVIDER_BONUS_STEP = 0.1;
 const MERGER_PULL_SHARE = 0.5;
@@ -28,6 +31,10 @@ function formatPercent(value) {
 
 function formatBonus(multiplier) {
   return `+${Math.round((multiplier - 1) * 100)}%`;
+}
+
+function withFlatDamage(description) {
+  return `${description} Adds +${UPGRADE_FLAT_DAMAGE} flat damage when signal passes through this lens.`;
 }
 
 export const SPECIAL_UPGRADE_CARDS = [
@@ -62,20 +69,10 @@ export const SPECIAL_UPGRADE_CARDS = [
 
 export const BUFF_LIBRARY = [
   {
-    id: "multiplier",
-    name: `Local Multiplier ${formatBonus(1 + LOCAL_MULTIPLIER_STEP)}`,
-    short: "AMP",
-    description: `Amplifies this lens output by ${formatPercent(LOCAL_MULTIPLIER_STEP)}.`,
-    color: "#7ce8b5",
-    apply(slot) {
-      slot.damageMultiplier += LOCAL_MULTIPLIER_STEP;
-    },
-  },
-  {
     id: "fire",
     name: "Fire Core",
     short: "FIRE",
-    description: `Every shot ignites. Burn deals ${formatPercent(BURN_DAMAGE_FACTOR)} periodic damage.`,
+    description: withFlatDamage(`Every shot ignites. Burn deals ${formatPercent(BURN_DAMAGE_FACTOR)} periodic damage.`),
     color: "#ff8e72",
     apply(slot) {
       slot.alwaysFire = true;
@@ -85,17 +82,37 @@ export const BUFF_LIBRARY = [
     id: "penetration",
     name: "Penetration",
     short: "PEN",
-    description: "Every shot penetrates through the first target.",
+    description: withFlatDamage("Every shot penetrates through the first target."),
     color: "#89b7ff",
     apply(slot) {
       slot.alwaysPenetrate = true;
     },
   },
   {
+    id: "split",
+    name: `Split Shot ${SPLIT_ANGLE_DEGREES}deg`,
+    short: "SPLT",
+    description: withFlatDamage(`On hit, this bullet splits into 2 bullets that fly at +/-${SPLIT_ANGLE_DEGREES}deg.`),
+    color: "#7afff0",
+    apply(slot) {
+      slot.alwaysSplit = true;
+    },
+  },
+  {
+    id: "ricochet",
+    name: `Ricochet x${RICOCHET_BOUNCES}`,
+    short: "RICO",
+    description: withFlatDamage(`Every shot ricochets off enemies and walls up to ${RICOCHET_BOUNCES} times.`),
+    color: "#7ac8ff",
+    apply(slot) {
+      slot.alwaysRicochet = true;
+    },
+  },
+  {
     id: "overdrive",
     name: `Overdrive ${formatBonus(1 + OVERDRIVE_STEP)}`,
     short: "OVR",
-    description: `Raises this lens output by ${formatPercent(OVERDRIVE_STEP)}.`,
+    description: withFlatDamage(`Raises this lens output by ${formatPercent(OVERDRIVE_STEP)}.`),
     color: "#ffb56b",
     apply(slot) {
       slot.damageMultiplier += OVERDRIVE_STEP;
@@ -105,8 +122,9 @@ export const BUFF_LIBRARY = [
     id: "uplink",
     name: `Left-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
     short: "LEFT",
-    description:
+    description: withFlatDamage(
       `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} branch into the left lane of the next layer.`,
+    ),
     color: "#72e0ff",
     apply(slot) {
       slot.upLink = true;
@@ -116,8 +134,9 @@ export const BUFF_LIBRARY = [
     id: "downlink",
     name: `Right-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
     short: "RIGHT",
-    description:
+    description: withFlatDamage(
       `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} branch into the right lane of the next layer.`,
+    ),
     color: "#a890ff",
     apply(slot) {
       slot.downLink = true;
@@ -127,7 +146,7 @@ export const BUFF_LIBRARY = [
     id: "curse",
     name: "Curse Core",
     short: "CURSE",
-    description: "Every shot curses. Curse deals periodic void damage.",
+    description: withFlatDamage("Every shot curses. Curse deals periodic void damage."),
     color: "#9a63ff",
     apply(slot) {
       slot.alwaysCurse = true;
@@ -137,7 +156,7 @@ export const BUFF_LIBRARY = [
     id: "slow",
     name: "Slow Field",
     short: "SLOW",
-    description: `Every shot slows targets by ${formatPercent(SLOW_FACTOR)} for ${SLOW_DURATION.toFixed(1)}s.`,
+    description: withFlatDamage(`Every shot slows targets by ${formatPercent(SLOW_FACTOR)} for ${SLOW_DURATION.toFixed(1)}s.`),
     color: "#7fd9ff",
     apply(slot) {
       slot.alwaysSlow = true;
@@ -147,7 +166,7 @@ export const BUFF_LIBRARY = [
     id: "freeze",
     name: "Freeze Pulse",
     short: "FRZ",
-    description: `Every shot freezes targets in place for ${FREEZE_DURATION.toFixed(2)}s.`,
+    description: withFlatDamage(`Every shot freezes targets in place for ${FREEZE_DURATION.toFixed(2)}s.`),
     color: "#d8f4ff",
     apply(slot) {
       slot.alwaysFreeze = true;
@@ -157,7 +176,9 @@ export const BUFF_LIBRARY = [
     id: "pushback",
     name: "Push Back",
     short: "PUSH",
-    description: `Every shot knocks enemies back by ${PUSHBACK_BASE} plus ${PUSHBACK_PER_DAMAGE} per damage dealt.`,
+    description: withFlatDamage(
+      `Every shot knocks enemies back by ${PUSHBACK_BASE} plus ${PUSHBACK_PER_DAMAGE} per damage dealt.`,
+    ),
     color: "#ffb7d9",
     apply(slot) {
       slot.alwaysPushback = true;
@@ -167,8 +188,9 @@ export const BUFF_LIBRARY = [
     id: "relay_multiplier",
     name: `Back Multiplier ${formatBonus(1 + RELAY_BONUS_STEP)}`,
     short: "BACK",
-    description:
+    description: withFlatDamage(
       `Does not power this lens. Multiplies all incoming signal from behind by ${formatPercent(RELAY_BONUS_STEP)} and forwards it.`,
+    ),
     color: "#6bf0da",
     apply(slot) {
       slot.relayMultiplier = true;
@@ -178,7 +200,9 @@ export const BUFF_LIBRARY = [
     id: "divider_multiplier",
     name: `Divider ${formatBonus(1 + DIVIDER_BONUS_STEP)}`,
     short: "DIV2",
-    description: `Keeps ${formatPercent(1 - DIVIDER_SPLIT_SHARE)} on the current path and splits ${formatPercent(DIVIDER_SPLIT_SHARE)} into top and bottom rows of this column, each amplified by ${formatPercent(DIVIDER_BONUS_STEP)}.`,
+    description: withFlatDamage(
+      `Keeps ${formatPercent(1 - DIVIDER_SPLIT_SHARE)} on the current path and splits ${formatPercent(DIVIDER_SPLIT_SHARE)} into top and bottom rows of this column, each amplified by ${formatPercent(DIVIDER_BONUS_STEP)}.`,
+    ),
     color: "#7bb4ff",
     apply(slot) {
       slot.dividerMultiplier = true;
@@ -188,8 +212,9 @@ export const BUFF_LIBRARY = [
     id: "merger_multiplier",
     name: `Merger ${formatBonus(1 + MERGER_BONUS_STEP)}`,
     short: "MRG3",
-    description:
+    description: withFlatDamage(
       `Pulls ${formatPercent(MERGER_PULL_SHARE)} from adjacent top and bottom rows in this column, amplifies that siphoned signal by ${formatPercent(MERGER_BONUS_STEP)}, and adds it to the current path.`,
+    ),
     color: "#ff8ed8",
     apply(slot) {
       slot.mergerMultiplier = true;
@@ -212,6 +237,8 @@ function createSlot(row, isFrontColumn) {
     alwaysFreeze: false,
     alwaysPushback: false,
     alwaysPenetrate: false,
+    alwaysSplit: false,
+    alwaysRicochet: false,
     relayMultiplier: false,
     dividerMultiplier: false,
     mergerMultiplier: false,
@@ -546,12 +573,15 @@ function cloneSignal(signal) {
   return {
     energy: signal.energy,
     amp: signal.amp,
+    flatDamage: signal.flatDamage,
     fire: signal.fire,
     curse: signal.curse,
     slow: signal.slow,
     freeze: signal.freeze,
     pushback: signal.pushback,
     penetration: signal.penetration,
+    split: signal.split,
+    ricochet: signal.ricochet,
     buffNames: [...signal.buffNames],
     buffShorts: [...signal.buffShorts],
     buffColors: [...signal.buffColors],
@@ -567,12 +597,15 @@ function mergeSignals(signals) {
   const merged = {
     energy: 0,
     amp: 1,
+    flatDamage: 0,
     fire: false,
     curse: false,
     slow: false,
     freeze: false,
     pushback: false,
     penetration: false,
+    split: false,
+    ricochet: false,
     buffNames: [],
     buffShorts: [],
     buffColors: [],
@@ -581,12 +614,15 @@ function mergeSignals(signals) {
   for (const signal of validSignals) {
     merged.energy += signal.energy;
     merged.amp *= signal.amp;
+    merged.flatDamage += signal.flatDamage ?? 0;
     merged.fire = merged.fire || signal.fire;
     merged.curse = merged.curse || signal.curse;
     merged.slow = merged.slow || signal.slow;
     merged.freeze = merged.freeze || signal.freeze;
     merged.pushback = merged.pushback || signal.pushback;
     merged.penetration = merged.penetration || signal.penetration;
+    merged.split = merged.split || signal.split;
+    merged.ricochet = merged.ricochet || signal.ricochet;
     pushUnique(merged.buffNames, signal.buffNames);
     pushUnique(merged.buffShorts, signal.buffShorts);
     pushUnique(merged.buffColors, signal.buffColors);
@@ -626,12 +662,36 @@ function createLocalSignal(
   const signal = {
     energy: (receivesSource ? SOURCE_ROW_ENERGY : slot.baseEnergy) * (receivesSource ? engineMultiplier : 1),
     amp: slot.damageMultiplier,
+    flatDamage: slot.filled ? UPGRADE_FLAT_DAMAGE : 0,
     fire: slot.alwaysFire,
     curse: slot.alwaysCurse,
     slow: slot.alwaysSlow,
     freeze: slot.alwaysFreeze,
     pushback: slot.alwaysPushback,
     penetration: slot.alwaysPenetrate,
+    split: slot.alwaysSplit,
+    ricochet: slot.alwaysRicochet,
+    buffNames: [],
+    buffShorts: [],
+    buffColors: [],
+  };
+
+  return decorateSignal(signal, slot);
+}
+
+function createInjectedSignal(slot, energy) {
+  const signal = {
+    energy,
+    amp: slot.damageMultiplier,
+    flatDamage: slot.filled ? UPGRADE_FLAT_DAMAGE : 0,
+    fire: slot.alwaysFire,
+    curse: slot.alwaysCurse,
+    slow: slot.alwaysSlow,
+    freeze: slot.alwaysFreeze,
+    pushback: slot.alwaysPushback,
+    penetration: slot.alwaysPenetrate,
+    split: slot.alwaysSplit,
+    ricochet: slot.alwaysRicochet,
     buffNames: [],
     buffShorts: [],
     buffColors: [],
@@ -672,7 +732,16 @@ function applySlotBoost(signal, slot) {
 
 function createEmptyNodes(columnCount) {
   return Array.from({ length: columnCount }, () =>
-    Array.from({ length: ROWS }, () => ({ active: false, buffColors: [], buffShorts: [] })),
+    Array.from({ length: ROWS }, () => ({
+      active: false,
+      energy: 0,
+      amp: 0,
+      flatDamage: 0,
+      damage: 0,
+      buffNames: [],
+      buffColors: [],
+      buffShorts: [],
+    })),
   );
 }
 
@@ -683,6 +752,11 @@ function markNode(nodes, columnIndex, row, signal) {
 
   const node = nodes[columnIndex][row];
   node.active = true;
+  node.energy = signal.energy;
+  node.amp = signal.amp;
+  node.flatDamage = signal.flatDamage ?? 0;
+  node.damage = Math.max(1, Math.round((signal.energy * signal.amp + (signal.flatDamage ?? 0)) * 10) / 10);
+  pushUnique(node.buffNames, signal.buffNames);
   pushUnique(node.buffColors, signal.buffColors);
   pushUnique(node.buffShorts, signal.buffShorts);
 }
@@ -767,6 +841,9 @@ export function resolveWeaponOutputs(network, options = {}) {
   const connections = [];
   const sourceColumnIndex = network.columns.length - 1;
   const dispatchRow = options.dispatchRow ?? null;
+  const injectedNode = options.injectedNode ?? null;
+  const injectedEnergy =
+    options.injectedEnergy ?? SOURCE_ROW_ENERGY * (network.engineMultiplier ?? 1);
   let incoming = Array.from({ length: ROWS }, () => null);
 
   for (let columnIndex = network.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
@@ -797,7 +874,13 @@ export function resolveWeaponOutputs(network, options = {}) {
         Boolean(incoming[row]),
         dispatchRow,
       );
-      const combined = mergeSignals([incoming[row], localSignal]);
+      const injectedSignal =
+        injectedNode &&
+        injectedNode.columnIndex === columnIndex &&
+        injectedNode.row === row
+          ? createInjectedSignal(slot, injectedEnergy)
+          : null;
+      const combined = mergeSignals([incoming[row], localSignal, injectedSignal]);
       if (!combined) {
         continue;
       }
@@ -952,13 +1035,16 @@ export function resolveWeaponOutputs(network, options = {}) {
 
       return {
         energy: signal.energy,
-        damage: Math.max(1, Math.round(signal.energy * signal.amp * 10) / 10),
+        flatDamage: signal.flatDamage ?? 0,
+        damage: Math.max(1, Math.round((signal.energy * signal.amp + (signal.flatDamage ?? 0)) * 10) / 10),
         fire: signal.fire,
         curse: signal.curse,
         slow: signal.slow,
         freeze: signal.freeze,
         pushback: signal.pushback,
         penetration: signal.penetration,
+        split: signal.split,
+        ricochet: signal.ricochet,
         buffNames: signal.buffNames,
         buffShorts: signal.buffShorts,
         buffColors: signal.buffColors,
