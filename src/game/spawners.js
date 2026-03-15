@@ -1,9 +1,13 @@
-import { BOSS, BULLET, ENEMY, GAME_HEIGHT, GAME_WIDTH, MINIBOSS, SHIP } from "./constants.js";
+import { BOSS, BULLET, ENEMY, ENEMY_BULLET, GAME_HEIGHT, GAME_WIDTH, LAYOUT, MINIBOSS, SHIP } from "./constants.js";
 import { countCompletedColumns, createWeaponNetwork } from "./weapon-network.js";
 
 function randomBetween(min, max) {
   return Math.random() * (max - min) + min;
 }
+
+const OPENING_ENEMY_HP_SCALE = 0.42;
+const OPENING_ENEMY_SPEED_SCALE = 0.64;
+const OPENING_ENEMY_MIN_HP = 16;
 
 function enemyColor(hp) {
   const palette = [
@@ -29,7 +33,9 @@ function getMiniBossName(tier) {
 
 export function createShip(world) {
   const ship = world.createEntity();
-  world.addComponent(ship, "Transform", { x: 110, y: GAME_HEIGHT * 0.5 });
+  const battleLeft = LAYOUT.sidebarWidth + LAYOUT.battlePadding;
+  const battleRight = GAME_WIDTH - LAYOUT.battlePadding;
+  world.addComponent(ship, "Transform", { x: (battleLeft + battleRight) * 0.5, y: GAME_HEIGHT - 118 });
   world.addComponent(ship, "CircleCollider", { radius: SHIP.radius });
   world.addComponent(ship, "Ship", {
     hp: SHIP.hp,
@@ -37,6 +43,10 @@ export function createShip(world) {
     controlSpeed: SHIP.controlSpeed,
     fireInterval: SHIP.fireInterval,
     fireTimer: 0,
+    burstSpacing: SHIP.burstSpacing,
+    burstTimer: 0,
+    pendingShots: [],
+    activeVolleyRow: 0,
     contactCooldown: 0,
     gunOffsetsY: [...SHIP.gunOffsetsY],
   });
@@ -48,21 +58,22 @@ export function createBullet(world, x, y, stats) {
   const bullet = world.createEntity();
   world.addComponent(bullet, "Transform", { x, y });
   world.addComponent(bullet, "Velocity", {
-    x: BULLET.speedX * BULLET.startSpeedFactor,
-    y: 0,
+    x: 0,
+    y: -BULLET.speedX * BULLET.startSpeedFactor,
   });
   world.addComponent(bullet, "CircleCollider", { radius: BULLET.radius });
   world.addComponent(bullet, "Bullet", {
     damage: stats?.damage ?? BULLET.damage,
-    crit: stats?.crit ?? false,
     fire: stats?.fire ?? false,
-    electric: stats?.electric ?? false,
     curse: stats?.curse ?? false,
+    slow: stats?.slow ?? false,
+    freeze: stats?.freeze ?? false,
+    pushback: stats?.pushback ?? false,
     penetration: stats?.penetration ?? false,
     buffColors: [...(stats?.buffColors ?? [])],
     row: stats?.row ?? 0,
     age: 0,
-    baseSpeedX: BULLET.speedX,
+    baseSpeed: BULLET.speedX,
   });
   world.addComponent(bullet, "Render", {
     type: "bullet",
@@ -71,23 +82,51 @@ export function createBullet(world, x, y, stats) {
   return bullet;
 }
 
+export function createEnemyBullet(world, x, y, velocityX, velocityY) {
+  const bullet = world.createEntity();
+  world.addComponent(bullet, "Transform", { x, y });
+  world.addComponent(bullet, "Velocity", { x: velocityX, y: velocityY });
+  world.addComponent(bullet, "CircleCollider", { radius: ENEMY_BULLET.radius });
+  world.addComponent(bullet, "EnemyBullet", {
+    damage: ENEMY_BULLET.damage,
+  });
+  world.addComponent(bullet, "Render", {
+    type: "enemyBullet",
+    color: "#ff8da9",
+  });
+  return bullet;
+}
+
 export function createEnemy(world) {
   const completedColumns = countCompletedColumns(world.resources.weaponNetwork);
   const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
-  const hpScale = 1.15 + completedColumns * 1.15 + minibossesDefeated * 2.6;
-  const speedScale = 1.05 + completedColumns * 0.28 + minibossesDefeated * 0.42;
-  const radiusBonus = completedColumns * 4 + minibossesDefeated * 12;
+  const isOpeningWave = completedColumns === 0 && minibossesDefeated === 0;
+  const lateTierNerf = isOpeningWave ? 1 : 0.9;
+  const hpScale = 0.72 + completedColumns * 0.22 + minibossesDefeated * 0.45;
+  const speedScale = 0.88 + completedColumns * 0.08 + minibossesDefeated * 0.12;
+  const radiusBonus = completedColumns * 2 + minibossesDefeated * 5;
   const radius = randomBetween(ENEMY.minRadius + radiusBonus, ENEMY.maxRadius + radiusBonus);
-  const speed = randomBetween(ENEMY.minSpeed, ENEMY.maxSpeed) * speedScale;
+  const speed =
+    randomBetween(ENEMY.minSpeed, ENEMY.maxSpeed) *
+    speedScale *
+    lateTierNerf *
+    (isOpeningWave ? OPENING_ENEMY_SPEED_SCALE : 1);
   const hp = Math.max(
-    58,
-    Math.round((radius / 2 + 30 + completedColumns * 7 + minibossesDefeated * 18) * hpScale),
+    isOpeningWave ? OPENING_ENEMY_MIN_HP : 26,
+    Math.round(
+      (radius / 2 + 28 + completedColumns * 3 + minibossesDefeated * 8) *
+        hpScale *
+        lateTierNerf *
+        (isOpeningWave ? OPENING_ENEMY_HP_SCALE : 1),
+    ),
   );
-  const y = randomBetween(radius + 16, GAME_HEIGHT - radius - 16);
+  const battleLeft = LAYOUT.sidebarWidth + LAYOUT.battlePadding;
+  const battleRight = GAME_WIDTH - LAYOUT.battlePadding;
+  const x = randomBetween(battleLeft + radius, battleRight - radius);
 
   const enemy = world.createEntity();
-  world.addComponent(enemy, "Transform", { x: GAME_WIDTH + radius + 20, y });
-  world.addComponent(enemy, "Velocity", { x: -speed, y: 0 });
+  world.addComponent(enemy, "Transform", { x, y: -radius - 20 });
+  world.addComponent(enemy, "Velocity", { x: 0, y: speed });
   world.addComponent(enemy, "CircleCollider", { radius });
   world.addComponent(enemy, "Enemy", {
     hp,
@@ -102,6 +141,9 @@ export function createEnemy(world) {
     curseTicks: 0,
     curseTimer: 0,
     curseDamage: 0,
+    slowTimer: 0,
+    slowFactor: 0,
+    freezeTimer: 0,
   });
   world.addComponent(enemy, "Render", { type: "enemy", color: enemyColor(hp) });
   return enemy;
@@ -111,16 +153,21 @@ export function createMiniBoss(world, tier) {
   const radius = MINIBOSS.baseRadius + (tier - 1) * MINIBOSS.radiusPerTier;
   const hp = MINIBOSS.baseHp + tier * MINIBOSS.hpPerTier;
   const boss = world.createEntity();
+  const battleLeft = LAYOUT.sidebarWidth + LAYOUT.battlePadding;
+  const battleRight = GAME_WIDTH - LAYOUT.battlePadding;
+  const x = battleLeft + (battleRight - battleLeft) * Math.min(0.8, 0.2 + tier * 0.14);
   world.addComponent(boss, "Transform", {
-    x: GAME_WIDTH + radius * 0.55,
-    y: GAME_HEIGHT * (0.26 + tier * 0.11),
+    x,
+    y: -radius - 30,
   });
-  world.addComponent(boss, "Velocity", { x: -MINIBOSS.speed, y: 0 });
+  world.addComponent(boss, "Velocity", { x: 0, y: MINIBOSS.speed });
   world.addComponent(boss, "CircleCollider", { radius });
   world.addComponent(boss, "Enemy", {
     hp,
     maxHp: hp,
     speed: MINIBOSS.speed,
+    fireTimer: 0,
+    fireInterval: MINIBOSS.fireInterval,
     isBoss: false,
     isMiniBoss: true,
     miniBossTier: tier,
@@ -131,6 +178,9 @@ export function createMiniBoss(world, tier) {
     curseTicks: 0,
     curseTimer: 0,
     curseDamage: 0,
+    slowTimer: 0,
+    slowFactor: 0,
+    freezeTimer: 0,
   });
   world.addComponent(boss, "Render", { type: "enemy", color: "#ff8d57" });
   return boss;
@@ -138,16 +188,20 @@ export function createMiniBoss(world, tier) {
 
 export function createBoss(world) {
   const boss = world.createEntity();
+  const battleLeft = LAYOUT.sidebarWidth + LAYOUT.battlePadding;
+  const battleRight = GAME_WIDTH - LAYOUT.battlePadding;
   world.addComponent(boss, "Transform", {
-    x: GAME_WIDTH + BOSS.radius * 0.35,
-    y: GAME_HEIGHT * 0.5,
+    x: (battleLeft + battleRight) * 0.5,
+    y: -BOSS.radius - 40,
   });
-  world.addComponent(boss, "Velocity", { x: -BOSS.speed, y: 0 });
+  world.addComponent(boss, "Velocity", { x: 0, y: BOSS.speed });
   world.addComponent(boss, "CircleCollider", { radius: BOSS.radius });
   world.addComponent(boss, "Enemy", {
     hp: BOSS.hp,
     maxHp: BOSS.hp,
     speed: BOSS.speed,
+    fireTimer: 0,
+    fireInterval: BOSS.fireInterval,
     isBoss: true,
     isMiniBoss: false,
     miniBossTier: 0,
@@ -158,6 +212,9 @@ export function createBoss(world) {
     curseTicks: 0,
     curseTimer: 0,
     curseDamage: 0,
+    slowTimer: 0,
+    slowFactor: 0,
+    freezeTimer: 0,
   });
   world.addComponent(boss, "Render", { type: "enemy", color: "#ff5d8f" });
   return boss;
@@ -166,6 +223,7 @@ export function createBoss(world) {
 export function resetGame(world) {
   const keepStars = world.resources.stars;
   const keepInput = world.resources.input;
+  const keepPointer = world.resources.pointer;
   world.entities.clear();
   world.components.clear();
   world.nextEntityId = 1;
@@ -174,6 +232,7 @@ export function resetGame(world) {
     ...world.resources,
     stars: keepStars,
     input: keepInput,
+    pointer: keepPointer,
     weaponNetwork: createWeaponNetwork(),
     gameOver: false,
     bossSpawned: false,
@@ -183,6 +242,7 @@ export function resetGame(world) {
     pendingSpecialUpgrade: false,
     score: 0,
     commitUpgrade: false,
+    dispatchRow: 0,
     signalTime: world.resources.signalTime ?? 0,
     enemySpawnTimer: 0,
     restartRequested: false,
@@ -192,6 +252,7 @@ export function resetGame(world) {
   world.resources.input.a = false;
   world.resources.input.s = false;
   world.resources.input.d = false;
+  world.resources.pointer.active = false;
 
   createShip(world);
 }

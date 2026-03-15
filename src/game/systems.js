@@ -1,12 +1,18 @@
-import { BULLET, ELECTRIC, GAME_HEIGHT, GAME_WIDTH, SHIP } from "./constants.js";
-import { createBoss, createBullet, createEnemy, createMiniBoss, resetGame } from "./spawners.js";
+import { BOSS, BULLET, ENEMY_BULLET, GAME_HEIGHT, GAME_WIDTH, LAYOUT, MINIBOSS, SHIP } from "./constants.js";
+import { createBoss, createBullet, createEnemy, createEnemyBullet, createMiniBoss, resetGame } from "./spawners.js";
 import {
+  BASE_ENGINE_ENERGY,
+  FREEZE_DURATION,
+  PUSHBACK_BASE,
+  PUSHBACK_PER_DAMAGE,
+  SLOW_DURATION,
+  SLOW_FACTOR,
+  SOURCE_ROW_ENERGY,
   applyUpgradeToSelectedRow,
   beginSpecialUpgrade,
   beginUpgrade,
   createPreviewNetwork,
   countCompletedColumns,
-  getActiveColumn,
   hasAvailableUpgrade,
   isNetworkComplete,
   resolveWeaponOutputs,
@@ -20,7 +26,11 @@ function circlesOverlap(a, ra, b, rb) {
 }
 
 function isPaused(world) {
-  return world.resources.gameOver || world.resources.weaponNetwork.upgrade.active;
+  return (
+    world.resources.gameOver ||
+    world.resources.weaponNetwork.upgrade.active ||
+    (world.resources.bossDefeated && !world.resources.pendingSpecialUpgrade)
+  );
 }
 
 function clearDirectionalInput(world) {
@@ -56,12 +66,6 @@ function mixColors(colors, fallback) {
 function bulletColor(stats) {
   const colors = stats.buffColors.filter(Boolean);
   if (colors.length === 0) {
-    if (stats.energy >= 5) {
-      return "#ffc96a";
-    }
-    if (stats.energy >= 3) {
-      return "#ff9b8c";
-    }
     return "#dff9ff";
   }
 
@@ -101,10 +105,11 @@ function damageEnemy(world, enemyEntity, damage) {
 
   if (enemy.hp <= 0) {
     const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
-    const scoreMultiplier = enemy.isMiniBoss ? 0 : 0.85 ** minibossesDefeated;
+    const scoreMultiplier = enemy.isMiniBoss || enemy.isBoss ? 0 : 0.85 ** minibossesDefeated;
 
     if (enemy.isBoss) {
       world.resources.bossDefeated = true;
+      world.resources.pendingSpecialUpgrade = true;
     }
     if (enemy.isMiniBoss) {
       world.resources.minibossesDefeated = Math.max(
@@ -130,6 +135,12 @@ function enemyDebuffColors(enemy) {
   if (enemy.curseTicks > 0) {
     colors.push("#9a63ff");
   }
+  if ((enemy.freezeTimer ?? 0) > 0) {
+    colors.push("#d8f4ff");
+  }
+  if ((enemy.slowTimer ?? 0) > 0) {
+    colors.push("#7fd9ff");
+  }
   return colors;
 }
 
@@ -139,16 +150,18 @@ function drawShip(ctx, x, y, scale = 1) {
   ctx.scale(scale, scale);
   ctx.fillStyle = "#a7d8ff";
   ctx.beginPath();
-  ctx.moveTo(30, 0);
-  ctx.lineTo(-20, -24);
-  ctx.lineTo(-11, 0);
-  ctx.lineTo(-20, 24);
+  ctx.moveTo(0, -30);
+  ctx.lineTo(-24, 18);
+  ctx.lineTo(-10, 10);
+  ctx.lineTo(0, 24);
+  ctx.lineTo(10, 10);
+  ctx.lineTo(24, 18);
   ctx.closePath();
   ctx.fill();
 
   ctx.fillStyle = "#61b3ff";
-  for (const offsetY of SHIP.gunOffsetsY) {
-    ctx.fillRect(24, offsetY - 2.5, 12, 5);
+  for (const offsetX of SHIP.gunOffsetsY) {
+    ctx.fillRect(offsetX - 2.5, -38, 5, 12);
   }
   ctx.restore();
 }
@@ -158,54 +171,55 @@ function drawGunChargeEffects(ctx, shipX, shipY, ship, outputs, signalTime) {
     return;
   }
 
-  const chargeProgress = Math.min(1, ship.fireTimer / Math.max(0.001, ship.fireInterval));
+  const activeOutputs = outputs.filter(Boolean);
+  if (activeOutputs.length === 0) {
+    return;
+  }
 
-  for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
-    const stats = outputs[row];
-    if (!stats) {
+  const chargeProgress = Math.min(1, ship.fireTimer / Math.max(0.001, ship.fireInterval));
+  const queuedShots = ship.pendingShots?.length ?? 0;
+  const x = shipX;
+  const conduitStartY = shipY + 4;
+  const conduitEndY = shipY - SHIP.muzzleOffsetX + 6;
+  const color = mixColors(
+    activeOutputs.flatMap((output) => output.buffColors ?? []),
+    bulletColor(activeOutputs[0]),
+  );
+  const pulseCount = Math.max(3, Math.min(6, activeOutputs.length + queuedShots));
+
+  ctx.strokeStyle = color;
+  ctx.globalAlpha = 0.18 + chargeProgress * 0.25;
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x, conduitStartY);
+  ctx.lineTo(x, conduitEndY);
+  ctx.stroke();
+
+  for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex += 1) {
+    const localProgress = Math.max(0, Math.min(1, chargeProgress * 1.35 - pulseIndex * 0.14));
+    if (localProgress <= 0) {
       continue;
     }
 
-    const y = shipY + ship.gunOffsetsY[row];
-    const conduitStartX = shipX - 2;
-    const conduitEndX = shipX + SHIP.muzzleOffsetX - 6;
-    const color = bulletColor(stats);
-    const pulseColors = stats.buffColors.length > 0 ? stats.buffColors : [color];
-
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = 0.18 + chargeProgress * 0.2;
-    ctx.lineWidth = 4;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(conduitStartX, y);
-    ctx.lineTo(conduitEndX, y);
-    ctx.stroke();
-
-    for (let pulseIndex = 0; pulseIndex < 3; pulseIndex += 1) {
-      const localProgress = Math.max(0, Math.min(1, chargeProgress * 1.25 - pulseIndex * 0.22));
-      if (localProgress <= 0) {
-        continue;
-      }
-
-      const eased = localProgress * localProgress;
-      const x = conduitStartX + (conduitEndX - conduitStartX) * eased;
-      ctx.fillStyle = pulseColors[pulseIndex % pulseColors.length];
-      ctx.globalAlpha = 0.35 + localProgress * 0.45;
-      ctx.beginPath();
-      ctx.arc(x, y, 2.5 + localProgress * 2.4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    const muzzleX = shipX + SHIP.muzzleOffsetX;
-    const muzzlePulse = 0.8 + Math.sin(signalTime * 7 + row * 0.8) * 0.2;
+    const eased = localProgress * localProgress;
+    const y = conduitStartY + (conduitEndY - conduitStartY) * eased;
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.25 + chargeProgress * 0.35;
+    ctx.globalAlpha = 0.3 + localProgress * 0.45;
     ctx.beginPath();
-    ctx.arc(muzzleX, y, 5 + chargeProgress * 5 * muzzlePulse, 0, Math.PI * 2);
+    ctx.arc(x, y, 2.8 + localProgress * 2.8, 0, Math.PI * 2);
     ctx.fill();
-
-    ctx.globalAlpha = 1;
   }
+
+  const muzzleY = shipY - SHIP.muzzleOffsetX;
+  const muzzlePulse = 0.82 + Math.sin(signalTime * 7) * 0.18;
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.28 + chargeProgress * 0.38;
+  ctx.beginPath();
+  ctx.arc(x, muzzleY, 6 + chargeProgress * (6 + queuedShots) * muzzlePulse, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalAlpha = 1;
 }
 
 function wrapText(ctx, text, maxWidth) {
@@ -229,6 +243,86 @@ function wrapText(ctx, text, maxWidth) {
   }
 
   return lines;
+}
+
+function pushUniqueValues(target, values) {
+  for (const value of values) {
+    if (value && !target.includes(value)) {
+      target.push(value);
+    }
+  }
+}
+
+function mergeCycleOutputs(flows, rowCount) {
+  return Array.from({ length: rowCount }, (_, row) => {
+    const outputs = flows.map((flow) => flow.outputs[row]).filter(Boolean);
+    if (outputs.length === 0) {
+      return null;
+    }
+
+    const merged = {
+      energy: 0,
+      damage: 0,
+      fire: false,
+      curse: false,
+      slow: false,
+      freeze: false,
+      pushback: false,
+      penetration: false,
+      buffNames: [],
+      buffShorts: [],
+      buffColors: [],
+    };
+
+    for (const output of outputs) {
+      merged.energy = Math.max(merged.energy, output.energy ?? 0);
+      merged.damage = Math.max(merged.damage, output.damage ?? 0);
+      merged.fire = merged.fire || Boolean(output.fire);
+      merged.curse = merged.curse || Boolean(output.curse);
+      merged.slow = merged.slow || Boolean(output.slow);
+      merged.freeze = merged.freeze || Boolean(output.freeze);
+      merged.pushback = merged.pushback || Boolean(output.pushback);
+      merged.penetration = merged.penetration || Boolean(output.penetration);
+      pushUniqueValues(merged.buffNames, output.buffNames ?? []);
+      pushUniqueValues(merged.buffShorts, output.buffShorts ?? []);
+      pushUniqueValues(merged.buffColors, output.buffColors ?? []);
+    }
+
+    return merged;
+  });
+}
+
+function getDisplayedDispatchState(world, network = world.resources.weaponNetwork) {
+  const shipEntity = world.query("Ship")[0];
+  const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : null;
+  const pendingShots = ship?.pendingShots?.length ?? 0;
+  const activeRow = pendingShots > 0 ? (ship.activeVolleyRow ?? 0) : (world.resources.dispatchRow ?? 0);
+  const fireInterval = Math.max(0.001, ship?.fireInterval ?? SHIP.fireInterval);
+  const burstSpacing = Math.max(0.001, ship?.burstSpacing ?? SHIP.burstSpacing);
+  const signalProgress = pendingShots > 0
+    ? Math.max(0.25, 1 - (ship?.burstTimer ?? 0) / burstSpacing)
+    : Math.min(1, (ship?.fireTimer ?? 0) / fireInterval);
+
+  return {
+    dispatchRow: ((activeRow % network.rows) + network.rows) % network.rows,
+    signalProgress,
+  };
+}
+
+function resolveDisplayedWeaponFlow(world, network = world.resources.weaponNetwork) {
+  const displayState = getDisplayedDispatchState(world, network);
+  const flow = resolveWeaponOutputs(network, { dispatchRow: displayState.dispatchRow });
+  return {
+    ...flow,
+    pulseConnections: flow.connections
+      .filter((connection) => connection.active)
+      .map((connection) => ({
+        ...connection,
+        phaseOffset: 0,
+      })),
+    signalProgress: displayState.signalProgress,
+    dispatchRow: displayState.dispatchRow,
+  };
 }
 
 function buildFlowChangeSet(baseFlow, previewFlow) {
@@ -341,6 +435,44 @@ function collectLocalMergerSources(slot, row, rowCount) {
   return [];
 }
 
+function getHoveredGridNode(nodePositions, hoverPoint, slotRadius) {
+  if (!hoverPoint) {
+    return null;
+  }
+
+  let closest = null;
+  let closestDistance = (slotRadius + 8) ** 2;
+  for (const [key, point] of nodePositions) {
+    const dx = point.x - hoverPoint.x;
+    const dy = point.y - hoverPoint.y;
+    const distance = dx * dx + dy * dy;
+    if (distance > closestDistance) {
+      continue;
+    }
+
+    closest = key;
+    closestDistance = distance;
+  }
+
+  if (!closest) {
+    return null;
+  }
+
+  const [columnIndex, row] = closest.split(":").map(Number);
+  return { columnIndex, row };
+}
+
+function getRotatedHoverPoint(pointer, translateX, translateY) {
+  if (!pointer?.active) {
+    return null;
+  }
+
+  return {
+    x: translateY - pointer.y,
+    y: pointer.x - translateX,
+  };
+}
+
 function drawNodeGlyph(ctx, slot, x, y, slotRadius, strokeColor) {
   if (!slot?.filled) {
     return;
@@ -390,7 +522,7 @@ function formatBuildSummary(network) {
 
 function drawVictoryOverlay(ctx, canvas, world) {
   const network = world.resources.weaponNetwork;
-  const flow = resolveWeaponOutputs(network);
+  const flow = resolveDisplayedWeaponFlow(world, network);
   const panelX = 110;
   const panelY = 240;
   const panelWidth = canvas.width - 220;
@@ -421,7 +553,9 @@ function drawVictoryOverlay(ctx, canvas, world) {
   drawShip(ctx, panelX + 190, panelCenterY, SHIP.upgradeRenderScale);
   drawWeaponGrid(ctx, world, {
     flow,
+    scaffoldNetwork: previewNetwork,
     signalTime: world.resources.signalTime,
+    signalProgress: flow.signalProgress,
     frontX: panelX + panelWidth - 260,
     centerY: panelCenterY,
     rowSpacing,
@@ -480,18 +614,17 @@ function drawGunEndpoint(ctx, x, y, scale, activeColor) {
 
 function drawWeaponGrid(ctx, world, layout) {
   const network = world.resources.weaponNetwork;
+  const scaffoldNetwork = layout.scaffoldNetwork ?? network;
   const flow = layout.flow;
   const signalTime = layout.signalTime ?? 0;
+  const signalProgress = layout.signalProgress ?? null;
   const changedConnections = layout.changedConnections ?? new Set();
   const changedNodes = layout.changedNodes ?? new Set();
-  const activeColumn = getActiveColumn(network);
   const selectedRow =
     network.upgrade.active && network.upgrade.step === "slot" ? network.upgrade.selectedRow : null;
   const selectedColumn =
     network.upgrade.active && network.upgrade.step === "slot"
-      ? network.upgrade.mode === "special"
-        ? network.upgrade.selectedColumn
-        : network.activeColumn
+      ? network.upgrade.selectedColumn
       : null;
   const shipEntity = world.query("Ship", "Transform")[0];
   const shipY = shipEntity ? world.getComponent(shipEntity, "Transform").y : GAME_HEIGHT * 0.5;
@@ -499,13 +632,13 @@ function drawWeaponGrid(ctx, world, layout) {
   const rowSpacing = layout.rowSpacing ?? 26;
   const columnSpacing = layout.columnSpacing ?? 76;
   const slotRadius = layout.slotRadius ?? 14;
+  const showCoreLabels = layout.showCoreLabels ?? true;
+  const showNodeLabels = layout.showNodeLabels ?? true;
   const frontX = layout.frontX;
-  const leftmostX = frontX - (network.columns.length - 1) * columnSpacing;
-  const engineX = frontX - network.columns.length * columnSpacing - 120;
-  const dividerX = frontX - network.columns.length * columnSpacing - 46;
+  const leftmostX = frontX - (scaffoldNetwork.columns.length - 1) * columnSpacing;
+  const engineX = leftmostX - Math.max(96, columnSpacing + 8);
   const gunX = frontX + (layout.gunOffsetX ?? Math.max(72, columnSpacing + 12));
   const nodePositions = new Map();
-  const dividerPositions = new Map();
   const gunPositions = new Map();
 
   function getColumnPosition(columnIndex, row) {
@@ -517,8 +650,8 @@ function drawWeaponGrid(ctx, world, layout) {
     if (!point) {
       return null;
     }
-    if (point.type === "divider") {
-      return dividerPositions.get(point.row);
+    if (point.type === "engine") {
+      return { x: engineX, y: baseY };
     }
     if (point.type === "gun") {
       return gunPositions.get(point.row);
@@ -538,40 +671,22 @@ function drawWeaponGrid(ctx, world, layout) {
   ctx.font = `${layout.labelSize ?? 11}px Trebuchet MS, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  const engineValue = 5 * (network.engineMultiplier ?? 1);
+  const sourceColumnIndex = scaffoldNetwork.columns.length - 1;
+  const sourceRowsTotal =
+    scaffoldNetwork.columns[sourceColumnIndex] === scaffoldNetwork.columns[0]
+      ? SOURCE_ROW_ENERGY * network.rows
+      : BASE_ENGINE_ENERGY;
+  const engineValue = sourceRowsTotal * (network.engineMultiplier ?? 1);
   const engineLabel =
     Math.abs(engineValue - Math.round(engineValue)) < 0.01
       ? String(Math.round(engineValue))
       : engineValue.toFixed(1);
-  ctx.fillText(engineLabel, engineX, baseY);
-
-  ctx.beginPath();
-  ctx.moveTo(engineX + slotRadius + 8, baseY);
-  ctx.lineTo(dividerX - slotRadius - 8, baseY);
-  ctx.stroke();
-
-  ctx.fillStyle = "#223968";
-  ctx.beginPath();
-  ctx.arc(dividerX, baseY, slotRadius + 2, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  ctx.fillStyle = "#dce8ff";
-  ctx.fillText("/", dividerX, baseY);
-
-  for (let row = 0; row < network.rows; row += 1) {
-    const y = baseY + (row - 2) * rowSpacing;
-    dividerPositions.set(row, { x: dividerX, y });
-    ctx.beginPath();
-    ctx.moveTo(dividerX + slotRadius + 8, baseY);
-    ctx.lineTo(leftmostX - slotRadius - 10, y);
-    ctx.strokeStyle = "rgba(146, 198, 255, 0.2)";
-    ctx.lineWidth = layout.lineWidth ?? 2;
-    ctx.stroke();
+  if (showCoreLabels) {
+    ctx.fillText(engineLabel, engineX, baseY);
   }
 
-  for (let columnIndex = 0; columnIndex < network.columns.length; columnIndex += 1) {
-    const column = network.columns[columnIndex];
+  for (let columnIndex = 0; columnIndex < scaffoldNetwork.columns.length; columnIndex += 1) {
+    const column = scaffoldNetwork.columns[columnIndex];
     const x = frontX - columnIndex * columnSpacing;
 
     for (let row = 0; row < column.slots.length; row += 1) {
@@ -580,14 +695,30 @@ function drawWeaponGrid(ctx, world, layout) {
     }
   }
 
+  const hoveredNode = getHoveredGridNode(nodePositions, layout.hoverPoint ?? null, slotRadius);
+
+  gunPositions.set(0, { x: gunX, y: baseY });
+  const scaffoldColor = "rgba(142, 164, 202, 0.22)";
+
   for (let row = 0; row < network.rows; row += 1) {
-    const y = baseY + (row - 2) * rowSpacing;
-    gunPositions.set(row, { x: gunX, y });
+    const from = getEndpointPosition({ type: "engine", row: 0 });
+    const to = getColumnPosition(network.columns.length - 1, row);
+    if (!from || !to) {
+      continue;
+    }
+    drawConnectionStroke(
+      ctx,
+      from,
+      to,
+      scaffoldColor,
+      Math.max(1, (layout.lineWidth ?? 2) - 0.5),
+      slotRadius,
+    );
   }
 
-  for (let columnIndex = network.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
+  for (let columnIndex = scaffoldNetwork.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
     for (let row = 0; row < network.rows; row += 1) {
-      const slot = network.columns[columnIndex].slots[row];
+      const slot = scaffoldNetwork.columns[columnIndex].slots[row];
 
       for (const targetRow of collectLocalDividerTargets(slot, row, network.rows)) {
         const from = getColumnPosition(columnIndex, row);
@@ -597,8 +728,8 @@ function drawWeaponGrid(ctx, world, layout) {
             ctx,
             from,
             to,
-            "rgba(122, 156, 212, 0.16)",
-            (layout.lineWidth ?? 2) - 0.5,
+            scaffoldColor,
+            Math.max(1, (layout.lineWidth ?? 2) - 0.5),
             slotRadius,
           );
         }
@@ -612,8 +743,8 @@ function drawWeaponGrid(ctx, world, layout) {
             ctx,
             from,
             to,
-            "rgba(122, 156, 212, 0.16)",
-            (layout.lineWidth ?? 2) - 0.5,
+            scaffoldColor,
+            Math.max(1, (layout.lineWidth ?? 2) - 0.5),
             slotRadius,
           );
         }
@@ -626,7 +757,7 @@ function drawWeaponGrid(ctx, world, layout) {
 
     const guideKeys = new Set();
     for (let row = 0; row < network.rows; row += 1) {
-      const sourceSlot = network.columns[columnIndex].slots[row];
+      const sourceSlot = scaffoldNetwork.columns[columnIndex].slots[row];
       for (const targetRow of collectOutgoingRows(sourceSlot, row, network.rows)) {
         const key = `${row}:${targetRow}`;
         if (guideKeys.has(key)) {
@@ -641,8 +772,8 @@ function drawWeaponGrid(ctx, world, layout) {
             ctx,
             from,
             to,
-            "rgba(122, 156, 212, 0.16)",
-            (layout.lineWidth ?? 2) - 0.5,
+            scaffoldColor,
+            Math.max(1, (layout.lineWidth ?? 2) - 0.5),
             slotRadius,
           );
         }
@@ -656,23 +787,24 @@ function drawWeaponGrid(ctx, world, layout) {
       continue;
     }
 
-    const slot = network.columns[0].slots[row];
-    for (const targetRow of collectOutgoingRows(slot, row, network.rows)) {
-      const gun = gunPositions.get(targetRow);
-      if (gun) {
-        drawConnectionStroke(
-          ctx,
-          from,
-          gun,
-          "rgba(122, 156, 212, 0.16)",
-          (layout.lineWidth ?? 2) - 0.5,
-          slotRadius,
-        );
-      }
+    const gun = gunPositions.get(0);
+    if (gun) {
+      drawConnectionStroke(
+        ctx,
+        from,
+        gun,
+        scaffoldColor,
+        Math.max(1, (layout.lineWidth ?? 2) - 0.5),
+        slotRadius,
+      );
     }
   }
 
   for (const connection of flow.connections) {
+    if (!connection.active) {
+      continue;
+    }
+
     const from = getEndpointPosition(connection.from);
     const to = getEndpointPosition(connection.to);
 
@@ -684,35 +816,36 @@ function drawWeaponGrid(ctx, world, layout) {
       ctx,
       from,
       to,
-      connection.active
-        ? mixColors(connection.buffColors, "#fff4c4")
-        : "rgba(146, 198, 255, 0.18)",
-      connection.active ? (layout.lineWidth ?? 2) + 1 : layout.lineWidth ?? 2,
+      mixColors(connection.buffColors, "#fff4c4"),
+      (layout.lineWidth ?? 2) + 0.5,
       slotRadius,
     );
 
-    if (connection.active) {
+    const pulseSources =
+      flow.pulseConnections?.filter((pulse) => pulse.id === connection.id) ??
+      [{ ...connection, phaseOffset: 0 }];
+
+    for (const pulse of pulseSources) {
       const pulseColor = changedConnections.has(connection.id)
         ? "#fff4c4"
-        : mixColors(connection.buffColors, "#e8f7ff");
-      const pulseCount = 2;
-      for (let pulseIndex = 0; pulseIndex < pulseCount; pulseIndex += 1) {
-        const travel = (signalTime * 1.4 + pulseIndex / pulseCount) % 1;
-        const pulsePoint = getConnectionPulsePoint(from, to, travel, slotRadius);
-        ctx.fillStyle = pulseColor;
-        ctx.globalAlpha = changedConnections.has(connection.id) ? 0.95 : 0.75;
-        ctx.beginPath();
-        ctx.arc(
-          pulsePoint.x,
-          pulsePoint.y,
-          changedConnections.has(connection.id) ? 4.5 : 3.2,
-          0,
-          Math.PI * 2,
-        );
-        ctx.fill();
-      }
-      ctx.globalAlpha = 1;
+        : mixColors(pulse.buffColors ?? connection.buffColors, "#e8f7ff");
+      const travel = signalProgress == null
+        ? (signalTime * 1.15 + (pulse.phaseOffset ?? 0)) % 1
+        : Math.max(0.04, Math.min(0.98, signalProgress));
+      const pulsePoint = getConnectionPulsePoint(from, to, travel, slotRadius);
+      ctx.fillStyle = pulseColor;
+      ctx.globalAlpha = changedConnections.has(connection.id) ? 0.9 : 0.68;
+      ctx.beginPath();
+      ctx.arc(
+        pulsePoint.x,
+        pulsePoint.y,
+        changedConnections.has(connection.id) ? 4.2 : 3,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
     }
+    ctx.globalAlpha = 1;
   }
 
   for (let columnIndex = 0; columnIndex < network.columns.length; columnIndex += 1) {
@@ -727,10 +860,13 @@ function drawWeaponGrid(ctx, world, layout) {
         network.upgrade.active &&
         network.upgrade.step === "slot" &&
         (network.upgrade.mode === "special"
-          ? columnIndex === selectedColumn && slot.filled
-          : column === activeColumn && !slot.filled);
-      const isSelected = isSelectable && network.upgrade.selectedRow === row;
-      const isUnlocked = columnIndex <= network.activeColumn || slot.filled;
+          ? slot.filled
+          : !slot.filled);
+      const isSelected =
+        isSelectable &&
+        columnIndex === selectedColumn &&
+        network.upgrade.selectedRow === row;
+      const isUnlocked = true;
       const isChanged = changedNodes.has(`${columnIndex}:${row}`);
       const isEmpowered = (slot.specialMultiplier ?? 1) > 1.001;
       const nodeColor = nodeFlow?.active
@@ -795,6 +931,18 @@ function drawWeaponGrid(ctx, world, layout) {
         ctx.stroke();
       }
 
+      if (
+        hoveredNode &&
+        hoveredNode.columnIndex === columnIndex &&
+        hoveredNode.row === row
+      ) {
+        ctx.strokeStyle = "#fff4c4";
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(x, y, slotRadius + 11, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
       drawNodeGlyph(
         ctx,
         slot,
@@ -804,12 +952,14 @@ function drawWeaponGrid(ctx, world, layout) {
         nodeFlow?.active ? mixColors(nodeFlow.buffColors, "#f7fdff") : "rgba(223, 239, 255, 0.9)",
       );
 
-      const labelSize = slot.filled && String(slot.buffShort).length > 3
-        ? Math.max(8, (layout.labelSize ?? 11) - 2)
-        : layout.labelSize ?? 11;
-      ctx.fillStyle = slot.filled ? "#f4fbff" : "#8ea4ca";
-      ctx.font = `${labelSize}px Trebuchet MS, sans-serif`;
-      ctx.fillText(slot.filled ? slot.buffShort : columnIndex === 0 ? "G" : String(slot.baseEnergy), x, y);
+      if (showNodeLabels) {
+        const labelSize = slot.filled && String(slot.buffShort).length > 3
+          ? Math.max(8, (layout.labelSize ?? 11) - 2)
+          : layout.labelSize ?? 11;
+        ctx.fillStyle = slot.filled ? "#f4fbff" : "#8ea4ca";
+        ctx.font = `${labelSize}px Trebuchet MS, sans-serif`;
+        ctx.fillText(slot.filled ? slot.buffShort : columnIndex === 0 ? "G" : String(slot.baseEnergy), x, y);
+      }
 
       if (slot.filled && layout.showBuffLabels) {
         ctx.fillStyle = "#dce8ff";
@@ -819,66 +969,134 @@ function drawWeaponGrid(ctx, world, layout) {
     }
   }
 
-  for (let row = 0; row < network.rows; row += 1) {
-    const output = flow.outputs[row];
-    const gunPos = gunPositions.get(row);
-    drawGunEndpoint(
-      ctx,
-      gunPos.x,
-      gunPos.y,
-      Math.max(0.7, slotRadius / 12),
-      output ? bulletColor(output) : null,
-    );
-  }
+  const gunPos = gunPositions.get(0);
+  const activeOutputs = flow.outputs.filter(Boolean);
+  const gunColor =
+    activeOutputs.length > 0
+      ? mixColors(activeOutputs.flatMap((output) => output.buffColors ?? []), bulletColor(activeOutputs[0]))
+      : null;
+  drawGunEndpoint(
+    ctx,
+    gunPos.x,
+    gunPos.y,
+    Math.max(0.7, slotRadius / 12),
+    gunColor,
+  );
+}
+
+function getFittedGridMetrics(network, panelWidth, panelHeight, preferred) {
+  const columnSpacing = Math.min(
+    preferred.columnSpacing,
+    Math.max(72, (panelHeight - 240) / Math.max(1, network.columns.length)),
+  );
+  const rowSpacing = Math.min(
+    preferred.rowSpacing,
+    Math.max(50, (panelWidth - 140) / Math.max(4, network.rows - 1)),
+  );
+  const slotRadius = Math.min(
+    preferred.slotRadius,
+    Math.max(14, Math.min(rowSpacing * 0.28, columnSpacing * 0.22)),
+  );
+  const gunOffsetX = Math.max(72, Math.min(preferred.gunOffsetX, columnSpacing + slotRadius * 2.5));
+
+  return {
+    columnSpacing,
+    rowSpacing,
+    slotRadius,
+    gunOffsetX,
+  };
 }
 
 function drawUpgradeOverlay(ctx, canvas, world) {
   const network = world.resources.weaponNetwork;
   const upgrade = network.upgrade;
-  const baseFlow = resolveWeaponOutputs(network);
+  const displayState = getDisplayedDispatchState(world, network);
+  const baseFlow = resolveWeaponOutputs(network, { dispatchRow: displayState.dispatchRow });
   const previewNetwork = createPreviewNetwork(network);
-  const flow = resolveWeaponOutputs(previewNetwork);
+  const flow = resolveWeaponOutputs(previewNetwork, { dispatchRow: displayState.dispatchRow });
+  flow.pulseConnections = flow.connections
+    .filter((connection) => connection.active)
+    .map((connection) => ({
+      ...connection,
+      phaseOffset: 0,
+    }));
+  flow.signalProgress = displayState.signalProgress;
+  flow.dispatchRow = displayState.dispatchRow;
   const projectedOutputs = flow.outputs;
   const changeSet = buildFlowChangeSet(baseFlow, flow);
-  const overlayTop = 56;
-  const cardsY = 74;
-  const cardWidth = 360;
-  const cardHeight = 188;
-  const cardGap = 40;
-  const totalWidth = cardWidth * upgrade.cards.length + cardGap * (upgrade.cards.length - 1);
-  const startX = canvas.width * 0.5 - totalWidth * 0.5;
+  const shellX = 44;
+  const shellY = 38;
+  const shellWidth = canvas.width - 88;
+  const shellHeight = canvas.height - 76;
+  const modelPanelWidth = Math.max(620, Math.min(840, shellWidth * 0.47));
+  const gap = 18;
+  const modelX = shellX + 22;
+  const modelY = shellY + 22;
+  const modelWidth = modelPanelWidth - 44;
+  const modelHeight = shellHeight - 44;
+  const rightX = shellX + modelPanelWidth + gap;
+  const rightY = shellY + 22;
+  const rightWidth = shellWidth - modelPanelWidth - gap - 22;
+  const rightInnerWidth = rightWidth - 28;
+  const cardWidth = rightInnerWidth;
+  const cardHeight = Math.max(128, Math.min(168, (modelHeight - 152) / 3));
+  const cardGap = 16;
+  const cardsY = rightY + 94;
+  const modelMetrics = getFittedGridMetrics(network, modelWidth, modelHeight, {
+    rowSpacing: 68,
+    columnSpacing: 102,
+    slotRadius: 24,
+    gunOffsetX: 108,
+  });
 
   ctx.fillStyle = "rgba(3, 6, 14, 0.7)";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.fillStyle = "rgba(7, 13, 26, 0.96)";
+  ctx.strokeStyle = "rgba(149, 189, 255, 0.24)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(shellX, shellY, shellWidth, shellHeight, 24);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(10, 18, 34, 0.95)";
+  ctx.beginPath();
+  ctx.roundRect(modelX, modelY, modelWidth, modelHeight, 20);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.roundRect(rightX, rightY, rightWidth, modelHeight, 20);
+  ctx.fill();
 
   ctx.fillStyle = "#f3f7ff";
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.font = "bold 26px Trebuchet MS, sans-serif";
-  ctx.fillText(upgrade.mode === "special" ? "Special Upgrade" : "Upgrade Phase", 48, 20);
+  ctx.fillText(upgrade.mode === "special" ? "Special Upgrade" : "Upgrade Phase", rightX + 14, rightY);
   ctx.font = "16px Trebuchet MS, sans-serif";
 
   if (upgrade.step === "card") {
     ctx.fillText(
       upgrade.mode === "special"
-        ? "Choose a special reward: A/D or Left/Right, Enter confirms, 1/2/3 for direct pick."
-        : "Choose a card: A/D or Left/Right, Enter confirms, 1/2/3 for direct pick.",
-      48,
-      overlayTop,
+        ? "Choose a special reward: W/S or Up/Down, Enter confirms, 1/2/3 for direct pick."
+        : "Choose a card: W/S or Up/Down, Enter confirms, 1/2/3 for direct pick.",
+      rightX + 14,
+      rightY + 40,
     );
   } else {
     ctx.fillText(
       upgrade.mode === "special"
-        ? "Choose an existing lens: A/D changes column, W/S changes row, Enter applies."
-        : "Choose a target gun in the active column: W/S or Up/Down, Enter applies.",
-      48,
-      overlayTop,
+        ? "Choose an existing lens: Left/Right moves rows, Up/Down moves depth, Enter applies."
+        : "Choose any empty lens: Left/Right moves rows, Up/Down moves depth, Enter applies.",
+      rightX + 14,
+      rightY + 40,
     );
   }
 
   for (let index = 0; index < upgrade.cards.length; index += 1) {
     const card = upgrade.cards[index];
-    const x = startX + index * (cardWidth + cardGap);
+    const x = rightX + 14;
+    const y = cardsY + index * (cardHeight + cardGap);
     const isSelected = upgrade.selectedCardIndex === index;
     const isPending = upgrade.pendingCard?.id === card.id;
 
@@ -886,76 +1104,79 @@ function drawUpgradeOverlay(ctx, canvas, world) {
     ctx.strokeStyle = isSelected ? card.color : card.special ? "rgba(255, 226, 122, 0.45)" : "rgba(214, 228, 255, 0.2)";
     ctx.lineWidth = isSelected ? 4 : card.special ? 3 : 2;
     ctx.beginPath();
-    ctx.roundRect(x, cardsY, cardWidth, cardHeight, 16);
+    ctx.roundRect(x, y, cardWidth, cardHeight, 16);
     ctx.fill();
     ctx.stroke();
 
     if (card.special) {
       ctx.fillStyle = "rgba(255, 226, 122, 0.18)";
       ctx.beginPath();
-      ctx.roundRect(x + 10, cardsY + 10, cardWidth - 20, 26, 10);
+      ctx.roundRect(x + 10, y + 10, cardWidth - 20, 26, 10);
       ctx.fill();
       ctx.fillStyle = "#ffe27a";
       ctx.font = "bold 12px Trebuchet MS, sans-serif";
-      ctx.fillText("SPECIAL", x + 18, cardsY + 16);
+      ctx.fillText("SPECIAL", x + 18, y + 16);
     }
 
     ctx.fillStyle = card.color;
     ctx.font = "bold 24px Trebuchet MS, sans-serif";
-    ctx.fillText(`${index + 1}. ${card.name}`, x + 18, cardsY + (card.special ? 44 : 18));
+    ctx.fillText(`${index + 1}. ${card.name}`, x + 18, y + (card.special ? 44 : 18));
     ctx.fillStyle = "#dbe8ff";
     ctx.font = "16px Trebuchet MS, sans-serif";
     const descriptionLines = wrapText(ctx, card.description, cardWidth - 36);
     for (let lineIndex = 0; lineIndex < descriptionLines.length; lineIndex += 1) {
-      ctx.fillText(descriptionLines[lineIndex], x + 18, cardsY + (card.special ? 88 : 62) + lineIndex * 22);
+      ctx.fillText(descriptionLines[lineIndex], x + 18, y + (card.special ? 88 : 62) + lineIndex * 22);
     }
   }
 
-  const panelX = 74;
-  const panelY = 284;
-  const panelWidth = canvas.width - 148;
-  const panelHeight = 420;
-  const overlayCenterY = panelY + panelHeight * 0.5;
-  const overlayRowSpacing = 68;
-  ctx.fillStyle = "rgba(8, 14, 30, 0.92)";
-  ctx.strokeStyle = "rgba(149, 189, 255, 0.28)";
-  ctx.lineWidth = 2;
+  const upgradeModelTranslateX = modelX + 42;
+  const upgradeModelTranslateY = modelY + modelHeight - 36;
+  ctx.save();
   ctx.beginPath();
-  ctx.roundRect(panelX, panelY, panelWidth, panelHeight, 20);
-  ctx.fill();
-  ctx.stroke();
-
-  drawShip(ctx, panelX + 180, panelY + panelHeight * 0.5, SHIP.upgradeRenderScale);
+  ctx.rect(modelX + 18, modelY + 18, modelWidth - 36, modelHeight - 36);
+  ctx.clip();
+  ctx.translate(upgradeModelTranslateX, upgradeModelTranslateY);
+  ctx.rotate(-Math.PI / 2);
+  const cycleSpanX =
+    network.columns.length * modelMetrics.columnSpacing + 120 + modelMetrics.gunOffsetX;
+  const centeredFrontX = modelHeight * 0.5 + (cycleSpanX - modelMetrics.gunOffsetX) * 0.5 - 16;
   drawWeaponGrid(ctx, world, {
     flow,
     signalTime: world.resources.signalTime,
+    signalProgress: flow.signalProgress,
     changedConnections: changeSet.changedConnectionIds,
     changedNodes: changeSet.changedNodeKeys,
-    frontX: panelX + panelWidth - 260,
-    centerY: overlayCenterY,
-    rowSpacing: overlayRowSpacing,
-    columnSpacing: 102,
-    slotRadius: 24,
+    frontX: centeredFrontX,
+    centerY: modelWidth * 0.5 - 24,
+    rowSpacing: modelMetrics.rowSpacing,
+    columnSpacing: modelMetrics.columnSpacing,
+    slotRadius: modelMetrics.slotRadius,
     lineWidth: 3,
     labelSize: 14,
     buffSize: 11,
     showBuffLabels: true,
-    gunOffsetX: 108,
+    showCoreLabels: false,
+    gunOffsetX: modelMetrics.gunOffsetX,
+    hoverPoint: getRotatedHoverPoint(
+      world.resources.pointer,
+      upgradeModelTranslateX,
+      upgradeModelTranslateY,
+    ),
   });
+  ctx.restore();
 
   const shipEntity = world.query("Ship", "Transform")[0];
   const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : null;
   if (ship) {
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
-      const output = projectedOutputs[row];
-      const y = overlayCenterY + (row - 2) * overlayRowSpacing;
-      const damage = output ? output.damage : 0;
-      ctx.fillStyle = output ? bulletColor(output) : "#6e7e9f";
-      ctx.font = output ? "bold 18px Trebuchet MS, sans-serif" : "16px Trebuchet MS, sans-serif";
-      ctx.fillText(`DMG ${damage}`, panelX + 330, y);
-    }
+    const burstShots = projectedOutputs.filter(Boolean);
+    const primaryShot = burstShots[0] ?? null;
+    const labelY = modelY + 118;
+    ctx.fillStyle = primaryShot ? bulletColor(primaryShot) : "#6e7e9f";
+    ctx.font = primaryShot ? "bold 20px Trebuchet MS, sans-serif" : "16px Trebuchet MS, sans-serif";
+    ctx.fillText(`Gun: ${burstShots.length} shots`, modelX + 28, labelY);
+    ctx.fillText(`Base DMG: ${primaryShot ? primaryShot.damage : 0}`, modelX + 28, labelY + 40);
   }
 
   ctx.fillStyle = "#dbe8ff";
@@ -964,8 +1185,8 @@ function drawUpgradeOverlay(ctx, canvas, world) {
     upgrade.mode === "special"
       ? "MiniBoss reward: choose one special upgrade."
       : `Column ${network.activeColumn + 1}/${network.maxColumns}   Next cost: ${network.upgradeCost}`,
-    panelX + 26,
-    panelY + panelHeight - 40,
+    rightX + 14,
+    shellY + shellHeight - 46,
   );
 }
 
@@ -1018,9 +1239,9 @@ export function createShipFlightSystem() {
       transform.x += inputX * ship.controlSpeed * dt;
       transform.y += inputY * ship.controlSpeed * dt;
 
-      const minX = body.radius + 8;
-      const maxX = GAME_WIDTH - body.radius - 8;
-      const minY = body.radius + 8;
+      const minX = LAYOUT.sidebarWidth + LAYOUT.battlePadding + body.radius;
+      const maxX = GAME_WIDTH - LAYOUT.battlePadding - body.radius;
+      const minY = GAME_HEIGHT * 0.68;
       const maxY = GAME_HEIGHT - body.radius - 8;
       transform.x = Math.max(minX, Math.min(maxX, transform.x));
       transform.y = Math.max(minY, Math.min(maxY, transform.y));
@@ -1034,10 +1255,10 @@ export function backgroundParallaxSystem(world, dt) {
   }
 
   for (const star of world.resources.stars) {
-    star.x -= star.speed * dt;
-    if (star.x < -star.size) {
-      star.x = GAME_WIDTH + Math.random() * 40;
-      star.y = Math.random() * GAME_HEIGHT;
+    star.y += star.speed * dt;
+    if (star.y > GAME_HEIGHT + star.size) {
+      star.y = -Math.random() * 40;
+      star.x = Math.random() * GAME_WIDTH;
       star.alpha = Math.random() * 0.55 + 0.2;
     }
   }
@@ -1050,29 +1271,28 @@ export function createAutoFireSystem() {
     }
 
     const network = world.resources.weaponNetwork;
-    const outputs = resolveWeaponOutputs(network).outputs;
+    const dispatchRow = world.resources.dispatchRow ?? 0;
+    const outputs = resolveWeaponOutputs(network, { dispatchRow }).outputs;
 
     for (const entity of world.query("Ship", "Transform")) {
       const ship = world.getComponent(entity, "Ship");
       const transform = world.getComponent(entity, "Transform");
       ship.fireTimer += dt;
+      ship.burstTimer = Math.max(0, (ship.burstTimer ?? 0) - dt);
 
-      if (ship.fireTimer < ship.fireInterval) {
-        continue;
+      if ((!ship.pendingShots || ship.pendingShots.length === 0) && ship.fireTimer >= ship.fireInterval) {
+        ship.fireTimer = 0;
+        ship.activeVolleyRow = dispatchRow;
+        ship.pendingShots = outputs
+          .map((stats, row) => (stats ? { ...stats, row, color: bulletColor(stats) } : null))
+          .filter(Boolean);
+        world.resources.dispatchRow = (dispatchRow + 1) % network.rows;
       }
 
-      ship.fireTimer = 0;
-      for (let row = 0; row < ship.gunOffsetsY.length; row += 1) {
-        const stats = outputs[row];
-        if (!stats) {
-          continue;
-        }
-
-        createBullet(world, transform.x + SHIP.muzzleOffsetX, transform.y + ship.gunOffsetsY[row], {
-          ...stats,
-          row,
-          color: bulletColor(stats),
-        });
+      if ((ship.pendingShots?.length ?? 0) > 0 && ship.burstTimer <= 0) {
+        const shot = ship.pendingShots.shift();
+        createBullet(world, transform.x, transform.y - SHIP.muzzleOffsetX, shot);
+        ship.burstTimer = ship.burstSpacing ?? SHIP.burstSpacing;
       }
     }
   };
@@ -1084,19 +1304,15 @@ export function createEnemySpawnSystem() {
       return;
     }
 
-    if (
-      world.resources.bossSpawned ||
-      world.resources.activeMinibossTier > 0 ||
-      isNetworkComplete(world.resources.weaponNetwork)
-    ) {
-      return;
-    }
-
     const completedColumns = countCompletedColumns(world.resources.weaponNetwork);
     const minibossesDefeated = world.resources.minibossesDefeated ?? 0;
+    const isOpeningWave = completedColumns === 0 && minibossesDefeated === 0;
     const spawnInterval = Math.max(
-      0.18,
-      world.resources.enemySpawnInterval - completedColumns * 0.04 - minibossesDefeated * 0.12,
+      isOpeningWave ? 2.15 : 0.7,
+      world.resources.enemySpawnInterval -
+        completedColumns * 0.015 -
+        minibossesDefeated * 0.04 +
+        (isOpeningWave ? 1.45 : 0.38),
     );
 
     world.resources.enemySpawnTimer += dt;
@@ -1114,23 +1330,65 @@ export function enemyHomingSystem(world) {
     return;
   }
 
+  for (const entity of world.query("Enemy", "Transform", "Velocity")) {
+    const transform = world.getComponent(entity, "Transform");
+    const velocity = world.getComponent(entity, "Velocity");
+    const enemy = world.getComponent(entity, "Enemy");
+    const slowFactor = enemy.slowTimer > 0 ? Math.max(0, 1 - (enemy.slowFactor ?? 0)) : 1;
+    const effectiveSpeed = enemy.freezeTimer > 0 ? 0 : enemy.speed * slowFactor;
+    if (enemy.isBoss || enemy.isMiniBoss) {
+      const anchorY = enemy.isBoss ? BOSS.anchorY : MINIBOSS.anchorY;
+      const dy = anchorY - transform.y;
+      velocity.x = 0;
+      velocity.y = Math.abs(dy) <= effectiveSpeed * (1 / 60) ? 0 : Math.sign(dy) * effectiveSpeed;
+      continue;
+    }
+
+    velocity.x = 0;
+    velocity.y = effectiveSpeed;
+  }
+}
+
+export function bossAttackSystem(world, dt) {
+  if (isPaused(world)) {
+    return;
+  }
+
   const shipEntity = world.query("Ship", "Transform")[0];
   if (!shipEntity) {
     return;
   }
 
   const shipPos = world.getComponent(shipEntity, "Transform");
-  for (const entity of world.query("Enemy", "Transform", "Velocity")) {
-    const enemyPos = world.getComponent(entity, "Transform");
-    const velocity = world.getComponent(entity, "Velocity");
+  for (const entity of world.query("Enemy", "Transform", "CircleCollider")) {
     const enemy = world.getComponent(entity, "Enemy");
+    if (!enemy?.isBoss && !enemy?.isMiniBoss) {
+      continue;
+    }
 
-    const dx = shipPos.x - enemyPos.x;
-    const dy = shipPos.y - enemyPos.y;
+    const transform = world.getComponent(entity, "Transform");
+    const body = world.getComponent(entity, "CircleCollider");
+    const anchorY = enemy.isBoss ? BOSS.anchorY : MINIBOSS.anchorY;
+    if (Math.abs(transform.y - anchorY) > 8) {
+      continue;
+    }
+
+    enemy.fireTimer = (enemy.fireTimer ?? 0) + dt;
+    if (enemy.fireTimer < (enemy.fireInterval ?? BOSS.fireInterval)) {
+      continue;
+    }
+
+    enemy.fireTimer = 0;
+    const dx = shipPos.x - transform.x;
+    const dy = shipPos.y - transform.y;
     const length = Math.hypot(dx, dy) || 1;
-
-    velocity.x = (dx / length) * enemy.speed;
-    velocity.y = (dy / length) * enemy.speed;
+    createEnemyBullet(
+      world,
+      transform.x,
+      transform.y + body.radius * 0.55,
+      (dx / length) * ENEMY_BULLET.speed,
+      (dy / length) * ENEMY_BULLET.speed,
+    );
   }
 }
 
@@ -1150,7 +1408,8 @@ export function movementSystem(world, dt) {
       const eased = progress * progress;
       const speedFactor =
         BULLET.startSpeedFactor + (1 - BULLET.startSpeedFactor) * eased;
-      velocity.x = bullet.baseSpeedX * speedFactor;
+      velocity.x = 0;
+      velocity.y = -bullet.baseSpeed * speedFactor;
     }
 
     transform.x += velocity.x * dt;
@@ -1185,6 +1444,12 @@ export function enemyStatusSystem(world, dt) {
         enemy.curseTicks -= 1;
         damageEnemy(world, entity, enemy.curseDamage || 1);
       }
+    }
+
+    enemy.freezeTimer = Math.max(0, (enemy.freezeTimer ?? 0) - dt);
+    enemy.slowTimer = Math.max(0, (enemy.slowTimer ?? 0) - dt);
+    if (enemy.slowTimer <= 0) {
+      enemy.slowFactor = 0;
     }
   }
 
@@ -1225,28 +1490,8 @@ export function collisionSystem(world) {
         continue;
       }
 
-      const hitDamage = bullet.crit ? bullet.damage * 2 : bullet.damage;
-      const impactX = enemyPos.x;
-      const impactY = enemyPos.y;
+      const hitDamage = bullet.damage;
       damageEnemy(world, enemyEntity, hitDamage);
-
-      if (bullet.electric) {
-        const chainDamage = Math.max(1, Math.round(hitDamage * ELECTRIC.damageFactor));
-        for (const chainedEntity of enemyEntities) {
-          if (chainedEntity === enemyEntity || !world.entities.has(chainedEntity)) {
-            continue;
-          }
-
-          const chainedPos = world.getComponent(chainedEntity, "Transform");
-          const dx = chainedPos.x - impactX;
-          const dy = chainedPos.y - impactY;
-          if (dx * dx + dy * dy > ELECTRIC.radius * ELECTRIC.radius) {
-            continue;
-          }
-
-          damageEnemy(world, chainedEntity, chainDamage);
-        }
-      }
 
       if (world.entities.has(enemyEntity) && bullet.fire) {
         const enemy = world.getComponent(enemyEntity, "Enemy");
@@ -1254,7 +1499,7 @@ export function collisionSystem(world) {
         enemy.burnTimer = 0.42;
         enemy.burnDamage = Math.max(
           enemy.burnDamage,
-          Math.max(1, Math.round(bullet.damage * 0.2 * (bullet.crit ? 2 : 1))),
+          Math.max(1, Math.round(bullet.damage * 0.2)),
         );
       }
 
@@ -1268,8 +1513,27 @@ export function collisionSystem(world) {
         );
       }
 
+      if (world.entities.has(enemyEntity) && bullet.slow) {
+        const enemy = world.getComponent(enemyEntity, "Enemy");
+        enemy.slowTimer = Math.max(enemy.slowTimer ?? 0, SLOW_DURATION);
+        enemy.slowFactor = Math.max(enemy.slowFactor ?? 0, SLOW_FACTOR);
+      }
+
+      if (world.entities.has(enemyEntity) && bullet.freeze) {
+        const enemy = world.getComponent(enemyEntity, "Enemy");
+        enemy.freezeTimer = Math.max(enemy.freezeTimer ?? 0, FREEZE_DURATION);
+      }
+
+      if (world.entities.has(enemyEntity) && bullet.pushback) {
+        const pushDistance = Math.min(
+          enemyBody.radius * 1.35,
+          PUSHBACK_BASE + hitDamage * PUSHBACK_PER_DAMAGE,
+        );
+        enemyPos.y = Math.max(-enemyBody.radius * 0.6, enemyPos.y - pushDistance);
+      }
+
       if (bullet.penetration) {
-        bulletPos.x = enemyPos.x + enemyBody.radius + bulletBody.radius + 4;
+        bulletPos.y = enemyPos.y - enemyBody.radius - bulletBody.radius - 4;
       } else {
         world.destroyEntity(bulletEntity);
       }
@@ -1286,26 +1550,68 @@ export function collisionSystem(world) {
   const shipBody = world.getComponent(shipEntity, "CircleCollider");
   const ship = world.getComponent(shipEntity, "Ship");
 
-  if (ship.contactCooldown > 0) {
-    return;
+  if (ship.contactCooldown <= 0) {
+    for (const bulletEntity of world.query("EnemyBullet", "Transform", "CircleCollider")) {
+      const bulletPos = world.getComponent(bulletEntity, "Transform");
+      const bulletBody = world.getComponent(bulletEntity, "CircleCollider");
+      const bullet = world.getComponent(bulletEntity, "EnemyBullet");
+      if (!circlesOverlap(shipPos, shipBody.radius, bulletPos, bulletBody.radius)) {
+        continue;
+      }
+
+      ship.hp -= bullet.damage ?? 1;
+      ship.contactCooldown = 0.6;
+      world.destroyEntity(bulletEntity);
+      if (ship.hp <= 0) {
+        ship.hp = 0;
+        world.resources.gameOver = true;
+      }
+      break;
+    }
   }
 
-  for (const enemyEntity of world.query("Enemy", "Transform", "CircleCollider")) {
-    const enemyPos = world.getComponent(enemyEntity, "Transform");
-    const enemyBody = world.getComponent(enemyEntity, "CircleCollider");
-    const enemy = world.getComponent(enemyEntity, "Enemy");
-    if (!circlesOverlap(shipPos, shipBody.radius, enemyPos, enemyBody.radius)) {
-      continue;
-    }
+  if (ship.contactCooldown <= 0) {
+    for (const enemyEntity of world.query("Enemy", "Transform", "CircleCollider")) {
+      const enemyPos = world.getComponent(enemyEntity, "Transform");
+      const enemyBody = world.getComponent(enemyEntity, "CircleCollider");
+      const enemy = world.getComponent(enemyEntity, "Enemy");
+      if (!circlesOverlap(shipPos, shipBody.radius, enemyPos, enemyBody.radius)) {
+        continue;
+      }
 
-    ship.hp -= 1;
-    ship.contactCooldown = 0.6;
-    if (!enemy.isBoss && !enemy.isMiniBoss) {
-      world.destroyEntity(enemyEntity);
+      ship.hp -= 1;
+      ship.contactCooldown = 0.6;
+      if (!enemy.isBoss && !enemy.isMiniBoss) {
+        world.destroyEntity(enemyEntity);
+      }
+      if (ship.hp <= 0) {
+        ship.hp = 0;
+        world.resources.gameOver = true;
+      }
+      break;
     }
-    if (ship.hp <= 0) {
-      ship.hp = 0;
-      world.resources.gameOver = true;
+  }
+
+  if (ship.contactCooldown <= 0 && !world.resources.gameOver) {
+    for (const enemyEntity of world.query("Enemy", "Transform", "CircleCollider")) {
+      const enemyPos = world.getComponent(enemyEntity, "Transform");
+      const enemyBody = world.getComponent(enemyEntity, "CircleCollider");
+      const enemy = world.getComponent(enemyEntity, "Enemy");
+      if (enemyPos.y + enemyBody.radius < GAME_HEIGHT) {
+        continue;
+      }
+
+      ship.hp -= 1;
+      ship.contactCooldown = 0.6;
+      if (!enemy.isBoss && !enemy.isMiniBoss) {
+        world.destroyEntity(enemyEntity);
+      } else {
+        enemyPos.y = GAME_HEIGHT - enemyBody.radius;
+      }
+      if (ship.hp <= 0) {
+        ship.hp = 0;
+        world.resources.gameOver = true;
+      }
       break;
     }
   }
@@ -1321,9 +1627,23 @@ export function cleanupSystem(world) {
     }
   }
 
-  for (const entity of world.query("Enemy", "Transform")) {
+  for (const entity of world.query("EnemyBullet", "Transform")) {
     const { x, y } = world.getComponent(entity, "Transform");
     if (x > GAME_WIDTH + margin || x < -margin || y < -margin || y > GAME_HEIGHT + margin) {
+      world.destroyEntity(entity);
+    }
+  }
+
+  for (const entity of world.query("Enemy", "Transform")) {
+    const { x, y } = world.getComponent(entity, "Transform");
+    const body = world.getComponent(entity, "CircleCollider");
+    const radius = body?.radius ?? 0;
+    if (
+      x > GAME_WIDTH + radius + margin ||
+      x < -radius - margin ||
+      y < -radius - margin ||
+      y > GAME_HEIGHT + radius + margin
+    ) {
       world.destroyEntity(entity);
     }
   }
@@ -1337,6 +1657,7 @@ export function stateSystem(world) {
 
   const network = world.resources.weaponNetwork;
   const completedColumns = countCompletedColumns(network);
+  const unlockedColumns = Math.max(0, network.columns.length - 1);
 
   if (world.resources.commitUpgrade) {
     applyUpgradeToSelectedRow(network);
@@ -1358,17 +1679,11 @@ export function stateSystem(world) {
     !world.resources.gameOver &&
     !world.resources.bossSpawned &&
     world.resources.activeMinibossTier === 0 &&
-    completedColumns > (world.resources.minibossesDefeated ?? 0) &&
-    completedColumns < network.maxColumns
+    unlockedColumns > (world.resources.minibossesDefeated ?? 0) &&
+    unlockedColumns < network.maxColumns
   ) {
-    world.resources.activeMinibossTier = completedColumns;
-    createMiniBoss(world, completedColumns);
-    for (const entity of world.query("Enemy")) {
-      const enemy = world.getComponent(entity, "Enemy");
-      if (!enemy?.isMiniBoss) {
-        world.destroyEntity(entity);
-      }
-    }
+    world.resources.activeMinibossTier = unlockedColumns;
+    createMiniBoss(world, unlockedColumns);
     world.resources.enemySpawnTimer = 0;
     return;
   }
@@ -1381,12 +1696,8 @@ export function stateSystem(world) {
   ) {
     world.resources.bossSpawned = true;
     createBoss(world);
-    for (const entity of world.query("Enemy")) {
-      const enemy = world.getComponent(entity, "Enemy");
-      if (!enemy?.isBoss) {
-        world.destroyEntity(entity);
-      }
-    }
+    createEnemy(world);
+    createEnemy(world);
     world.resources.enemySpawnTimer = 0;
     return;
   }
@@ -1408,7 +1719,10 @@ export function createRenderSystem(ctx, canvas) {
   gradient.addColorStop(1, "#070b17");
 
   return (world) => {
-    const flow = resolveWeaponOutputs(world.resources.weaponNetwork);
+    const flow = resolveDisplayedWeaponFlow(world, world.resources.weaponNetwork);
+    const currentFlow = flow;
+    const sidebarWidth = LAYOUT.sidebarWidth;
+    const panelPadding = LAYOUT.panelPadding;
     world.resources.signalTime += 1 / 60;
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -1419,6 +1733,15 @@ export function createRenderSystem(ctx, canvas) {
       ctx.fillRect(star.x, star.y, star.size, star.size);
     }
     ctx.globalAlpha = 1;
+
+    ctx.fillStyle = "rgba(5, 10, 20, 0.86)";
+    ctx.fillRect(0, 0, sidebarWidth, canvas.height);
+    ctx.strokeStyle = "rgba(126, 170, 232, 0.28)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sidebarWidth + 0.5, 0);
+    ctx.lineTo(sidebarWidth + 0.5, canvas.height);
+    ctx.stroke();
 
     for (const entity of world.query("Render", "Transform")) {
       const render = world.getComponent(entity, "Render");
@@ -1432,7 +1755,7 @@ export function createRenderSystem(ctx, canvas) {
           transform.x,
           transform.y,
           ship,
-          flow.outputs,
+          currentFlow.outputs,
           world.resources.signalTime,
         );
       }
@@ -1446,7 +1769,7 @@ export function createRenderSystem(ctx, canvas) {
         ctx.lineWidth = body.radius * 2.4;
         ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(transform.x - trailLength, transform.y);
+        ctx.moveTo(transform.x, transform.y + trailLength);
         ctx.lineTo(transform.x, transform.y);
         ctx.stroke();
 
@@ -1471,6 +1794,19 @@ export function createRenderSystem(ctx, canvas) {
           ctx.arc(sparkX, sparkY, 1.8, 0, Math.PI * 2);
           ctx.fill();
         }
+      }
+
+      if (render.type === "enemyBullet") {
+        const body = world.getComponent(entity, "CircleCollider");
+        ctx.fillStyle = render.color;
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath();
+        ctx.arc(transform.x, transform.y, body.radius + 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(transform.x, transform.y, body.radius, 0, Math.PI * 2);
+        ctx.fill();
       }
 
       if (render.type === "enemy") {
@@ -1535,38 +1871,85 @@ export function createRenderSystem(ctx, canvas) {
       }
     }
 
-    drawWeaponGrid(ctx, world, {
-      flow,
-      signalTime: world.resources.signalTime,
-      frontX: 300,
-      centerY: 118,
-      rowSpacing: 30,
-      columnSpacing: 58,
-      slotRadius: 10,
-      labelSize: 10,
-      showBuffLabels: false,
-      gunOffsetX: 68,
-    });
+	    const shipEntity = world.query("Ship")[0];
+	    const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : { hp: 0, maxHp: 0 };
+	    const network = world.resources.weaponNetwork;
+    const displayState = getDisplayedDispatchState(world, network);
 
-    const shipEntity = world.query("Ship")[0];
-    const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : { hp: 0, maxHp: 0 };
-    const network = world.resources.weaponNetwork;
+    ctx.fillStyle = "#f3f8ff";
+    ctx.font = "bold 24px Trebuchet MS, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText("Stats", panelPadding, panelPadding);
 
     ctx.fillStyle = "#e4eeff";
     ctx.font = "16px Trebuchet MS, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(`Ship HP: ${ship.hp}/${ship.maxHp}`, 14, 14);
-    ctx.fillText(`Score: ${world.resources.score}`, 14, 36);
-    ctx.fillText(`Move: W/A/S/D`, 14, 58);
-    ctx.fillText(`Next upgrade: ${network.nextUpgradeScore}`, 14, 80);
-    ctx.fillText(`Columns: ${network.columns.length}/${network.maxColumns}`, 14, 102);
+    ctx.fillText(`Ship HP: ${ship.hp}/${ship.maxHp}`, panelPadding, panelPadding + 40);
+    ctx.fillText(`Score: ${world.resources.score}`, panelPadding, panelPadding + 62);
+    ctx.fillText(`Move: W/A/S/D`, panelPadding, panelPadding + 84);
+	    ctx.fillText(
+	      `Signal row: ${displayState.dispatchRow + 1}`,
+	      panelPadding,
+	      panelPadding + 106,
+	    );
+    ctx.fillText(`Next upgrade: ${network.nextUpgradeScore}`, panelPadding, panelPadding + 128);
+    ctx.fillText(`Columns: ${network.columns.length}/${network.maxColumns}`, panelPadding, panelPadding + 150);
     ctx.fillText(
       `Threat tier: ${countCompletedColumns(network) + (world.resources.minibossesDefeated ?? 0) * 2}`,
-      14,
-      124,
+      panelPadding,
+      panelPadding + 172,
     );
-    ctx.fillText(`Minibosses: ${world.resources.minibossesDefeated ?? 0}/${network.maxColumns - 1}`, 14, 146);
+    ctx.fillText(
+      `Minibosses: ${world.resources.minibossesDefeated ?? 0}/${network.maxColumns - 1}`,
+      panelPadding,
+      panelPadding + 194,
+    );
+
+    const modelTop = 306;
+    const modelHeight = canvas.height - modelTop - panelPadding;
+    const modelWidth = sidebarWidth - panelPadding * 2;
+    const mainModelMetrics = getFittedGridMetrics(network, modelWidth, modelHeight, {
+      rowSpacing: 74,
+      columnSpacing: 112,
+      slotRadius: 18,
+      gunOffsetX: 94,
+    });
+
+    ctx.fillStyle = "#f3f8ff";
+    ctx.font = "bold 24px Trebuchet MS, sans-serif";
+    ctx.fillText("Model", panelPadding, 262);
+
+    const mainModelTranslateX = panelPadding + 18;
+    const mainModelTranslateY = canvas.height - panelPadding + 30;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(panelPadding, modelTop, modelWidth, modelHeight);
+    ctx.clip();
+    ctx.translate(mainModelTranslateX, mainModelTranslateY);
+    ctx.rotate(-Math.PI / 2);
+    drawWeaponGrid(ctx, world, {
+      flow,
+      signalTime: world.resources.signalTime,
+      signalProgress: flow.signalProgress,
+      frontX: modelHeight - (mainModelMetrics.gunOffsetX + 10),
+      centerY: modelWidth * 0.5 - 8,
+      rowSpacing: mainModelMetrics.rowSpacing,
+      columnSpacing: mainModelMetrics.columnSpacing,
+      slotRadius: mainModelMetrics.slotRadius,
+      lineWidth: 2.5,
+      showBuffLabels: false,
+      showNodeLabels: false,
+      showCoreLabels: false,
+      gunOffsetX: mainModelMetrics.gunOffsetX,
+      hoverPoint: getRotatedHoverPoint(
+        world.resources.pointer,
+        mainModelTranslateX,
+        mainModelTranslateY,
+      ),
+    });
+    ctx.restore();
 
     const bossEntity = getBossEntity(world);
     const miniBossEntity = getMiniBossEntity(world);
@@ -1574,8 +1957,8 @@ export function createRenderSystem(ctx, canvas) {
       const miniboss = world.getComponent(miniBossEntity, "Enemy");
       const barWidth = 280;
       const barHeight = 14;
-      const x = canvas.width - barWidth - 24;
-      const y = 20;
+      const x = panelPadding;
+      const y = 228;
       const progress = Math.max(0, miniboss.hp / miniboss.maxHp);
 
       ctx.fillStyle = "rgba(8, 14, 30, 0.9)";
@@ -1598,8 +1981,8 @@ export function createRenderSystem(ctx, canvas) {
       const boss = world.getComponent(bossEntity, "Enemy");
       const barWidth = 320;
       const barHeight = 18;
-      const x = canvas.width - barWidth - 24;
-      const y = miniBossEntity ? 72 : 20;
+      const x = panelPadding;
+      const y = miniBossEntity ? 284 : 228;
       const progress = Math.max(0, boss.hp / boss.maxHp);
 
       ctx.fillStyle = "rgba(8, 14, 30, 0.9)";
@@ -1618,7 +2001,11 @@ export function createRenderSystem(ctx, canvas) {
       ctx.fillText(boss.bossName ?? "Boss Core", x, y - 2);
     }
 
-    if (world.resources.bossDefeated && !world.resources.gameOver) {
+    if (
+      world.resources.bossDefeated &&
+      !world.resources.pendingSpecialUpgrade &&
+      !world.resources.gameOver
+    ) {
       drawVictoryOverlay(ctx, canvas, world);
     }
 

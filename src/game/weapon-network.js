@@ -1,8 +1,9 @@
-import { ELECTRIC } from "./constants.js";
-
 const ROWS = 5;
 const MAX_COLUMNS = 5;
-const INITIAL_UPGRADE_COST = 100;
+const INITIAL_UPGRADE_COST = 50;
+const UPGRADE_COST_GROWTH = 1.1;
+export const BASE_ENGINE_ENERGY = 25;
+export const SOURCE_ROW_ENERGY = BASE_ENGINE_ENERGY / ROWS;
 const ENGINE_OVERCLOCK_STEP = 0.1;
 const SPECIAL_EMPOWER_STEP = 0.1;
 const MAX_SPECIAL_MULTIPLIER = 1.6;
@@ -15,6 +16,11 @@ const MERGER_PULL_SHARE = 0.5;
 const MERGER_BONUS_STEP = 0.1;
 const RELAY_BONUS_STEP = 0.1;
 const LINK_BONUS_STEP = 0.1;
+export const SLOW_FACTOR = 0.45;
+export const SLOW_DURATION = 1.6;
+export const FREEZE_DURATION = 0.28;
+export const PUSHBACK_BASE = 14;
+export const PUSHBACK_PER_DAMAGE = 4;
 
 function formatPercent(value) {
   return `${Math.round(value * 100)}%`;
@@ -29,7 +35,7 @@ export const SPECIAL_UPGRADE_CARDS = [
     id: "engine_overclock",
     name: `Engine Overclock ${formatBonus(1 + ENGINE_OVERCLOCK_STEP)}`,
     short: "ENG+",
-    description: `Boosts source energy by ${formatPercent(ENGINE_OVERCLOCK_STEP)}. Each source row receives (5 * ${formatPercent(ENGINE_OVERCLOCK_STEP)}) / 5 more energy.`,
+    description: `Boosts source energy by ${formatPercent(ENGINE_OVERCLOCK_STEP)}. Each source row receives (${BASE_ENGINE_ENERGY} * ${formatPercent(ENGINE_OVERCLOCK_STEP)}) / ${ROWS} more energy.`,
     color: "#ffe27a",
     special: true,
     target: "none",
@@ -66,34 +72,13 @@ export const BUFF_LIBRARY = [
     },
   },
   {
-    id: "crit",
-    name: "Critical Core",
-    short: "CRIT",
-    description: `Every shot from this row crits for double damage and doubles burn damage if this row also ignites.`,
-    color: "#ffd56b",
-    apply(slot) {
-      slot.alwaysCrit = true;
-    },
-  },
-  {
     id: "fire",
     name: "Fire Core",
     short: "FIRE",
-    description:
-      `Every shot ignites. Burn deals ${formatPercent(BURN_DAMAGE_FACTOR)} periodic damage, doubled if this row also crits.`,
+    description: `Every shot ignites. Burn deals ${formatPercent(BURN_DAMAGE_FACTOR)} periodic damage.`,
     color: "#ff8e72",
     apply(slot) {
       slot.alwaysFire = true;
-    },
-  },
-  {
-    id: "electric",
-    name: "Electric Core",
-    short: "ARC",
-    description: `Every shot arcs ${formatPercent(ELECTRIC.damageFactor)} electric damage to nearby enemies around the impact point.`,
-    color: "#7cecff",
-    apply(slot) {
-      slot.alwaysElectric = true;
     },
   },
   {
@@ -118,10 +103,10 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "uplink",
-    name: `Up-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
-    short: "UP",
+    name: `Left-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
+    short: "LEFT",
     description:
-      `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} copy into the upper row of the next column.`,
+      `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} branch into the left lane of the next layer.`,
     color: "#72e0ff",
     apply(slot) {
       slot.upLink = true;
@@ -129,10 +114,10 @@ export const BUFF_LIBRARY = [
   },
   {
     id: "downlink",
-    name: `Down-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
-    short: "DOWN",
+    name: `Right-Link ${formatBonus(1 + LINK_BONUS_STEP)}`,
+    short: "RIGHT",
     description:
-      `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} copy into the lower row of the next column.`,
+      `Sends the normal signal forward and a second ${formatBonus(1 + LINK_BONUS_STEP)} branch into the right lane of the next layer.`,
     color: "#a890ff",
     apply(slot) {
       slot.downLink = true;
@@ -146,6 +131,36 @@ export const BUFF_LIBRARY = [
     color: "#9a63ff",
     apply(slot) {
       slot.alwaysCurse = true;
+    },
+  },
+  {
+    id: "slow",
+    name: "Slow Field",
+    short: "SLOW",
+    description: `Every shot slows targets by ${formatPercent(SLOW_FACTOR)} for ${SLOW_DURATION.toFixed(1)}s.`,
+    color: "#7fd9ff",
+    apply(slot) {
+      slot.alwaysSlow = true;
+    },
+  },
+  {
+    id: "freeze",
+    name: "Freeze Pulse",
+    short: "FRZ",
+    description: `Every shot freezes targets in place for ${FREEZE_DURATION.toFixed(2)}s.`,
+    color: "#d8f4ff",
+    apply(slot) {
+      slot.alwaysFreeze = true;
+    },
+  },
+  {
+    id: "pushback",
+    name: "Push Back",
+    short: "PUSH",
+    description: `Every shot knocks enemies back by ${PUSHBACK_BASE} plus ${PUSHBACK_PER_DAMAGE} per damage dealt.`,
+    color: "#ffb7d9",
+    apply(slot) {
+      slot.alwaysPushback = true;
     },
   },
   {
@@ -191,10 +206,11 @@ function createSlot(row, isFrontColumn) {
     buffShort: null,
     buffColor: null,
     damageMultiplier: 1,
-    alwaysCrit: false,
     alwaysFire: false,
-    alwaysElectric: false,
     alwaysCurse: false,
+    alwaysSlow: false,
+    alwaysFreeze: false,
+    alwaysPushback: false,
     alwaysPenetrate: false,
     relayMultiplier: false,
     dividerMultiplier: false,
@@ -202,7 +218,7 @@ function createSlot(row, isFrontColumn) {
     upLink: false,
     downLink: false,
     specialMultiplier: 1,
-    baseEnergy: isFrontColumn ? 1 : 1,
+    baseEnergy: isFrontColumn ? 1 : SOURCE_ROW_ENERGY,
   };
 }
 
@@ -213,8 +229,8 @@ function createColumn(index) {
   };
 }
 
-function getUpgradeCostForColumn(columnIndex) {
-  return INITIAL_UPGRADE_COST * 2 ** columnIndex;
+function getUpgradeCostForPurchase(upgradesPurchased) {
+  return Math.ceil(INITIAL_UPGRADE_COST * UPGRADE_COST_GROWTH ** upgradesPurchased);
 }
 
 function getRandomCards() {
@@ -233,11 +249,12 @@ export function createWeaponNetwork() {
   return {
     rows: ROWS,
     maxColumns: MAX_COLUMNS,
-    columns: [createColumn(0)],
+    columns: [createColumn(0), createColumn(1)],
     engineMultiplier: 1,
     activeColumn: 0,
-    nextUpgradeScore: getUpgradeCostForColumn(0),
-    upgradeCost: getUpgradeCostForColumn(0),
+    upgradesPurchased: 0,
+    nextUpgradeScore: getUpgradeCostForPurchase(0),
+    upgradeCost: getUpgradeCostForPurchase(0),
     upgrade: {
       active: false,
       mode: "normal",
@@ -270,8 +287,7 @@ export function getFirstEmptyRow(network) {
 }
 
 export function hasAvailableUpgrade(network) {
-  const column = getActiveColumn(network);
-  return Boolean(column && column.slots.some((slot) => !slot.filled));
+  return network.columns.some((column) => column.slots.some((slot) => !slot.filled));
 }
 
 export function isColumnFilled(column) {
@@ -296,8 +312,20 @@ export function beginUpgrade(network) {
   network.upgrade.cards = getRandomCards();
   network.upgrade.selectedCardIndex = 0;
   network.upgrade.pendingCard = null;
-  network.upgrade.selectedColumn = network.activeColumn;
-  network.upgrade.selectedRow = getFirstEmptyRow(network);
+  const firstEmpty = getFirstEmptyTarget(network);
+  network.upgrade.selectedColumn = firstEmpty.columnIndex;
+  network.upgrade.selectedRow = firstEmpty.row;
+}
+
+function getFirstEmptyTarget(network) {
+  for (let columnIndex = 0; columnIndex < network.columns.length; columnIndex += 1) {
+    const row = network.columns[columnIndex].slots.findIndex((slot) => !slot.filled);
+    if (row !== -1) {
+      return { columnIndex, row };
+    }
+  }
+
+  return { columnIndex: Math.max(0, network.activeColumn), row: 0 };
 }
 
 function getFirstFilledTarget(network) {
@@ -352,83 +380,86 @@ export function chooseCard(network, cardIndex = network.upgrade.selectedCardInde
     network.upgrade.selectedColumn = firstFilled.columnIndex;
     network.upgrade.selectedRow = firstFilled.row;
   } else {
-    network.upgrade.selectedColumn = network.activeColumn;
-    network.upgrade.selectedRow = getFirstEmptyRow(network);
+    const firstEmpty = getFirstEmptyTarget(network);
+    network.upgrade.selectedColumn = firstEmpty.columnIndex;
+    network.upgrade.selectedRow = firstEmpty.row;
   }
   return true;
 }
 
 export function moveRowSelection(network, direction) {
-  if (network.upgrade.mode === "special") {
-    const column = network.columns[network.upgrade.selectedColumn];
-    if (!column) {
-      return;
-    }
-
-    const filledRows = column.slots
-      .map((slot, row) => ({ slot, row }))
-      .filter(({ slot }) => slot.filled)
-      .map(({ row }) => row);
-
-    if (filledRows.length === 0) {
-      return;
-    }
-
-    const currentIndex = Math.max(0, filledRows.indexOf(network.upgrade.selectedRow));
-    const nextIndex = (currentIndex + direction + filledRows.length) % filledRows.length;
-    network.upgrade.selectedRow = filledRows[nextIndex];
-    return;
-  }
-
-  const column = getActiveColumn(network);
+  const column = network.columns[network.upgrade.selectedColumn];
   if (!column) {
     return;
   }
 
-  const empties = column.slots
+  const targetRows = column.slots
     .map((slot, row) => ({ slot, row }))
-    .filter(({ slot }) => !slot.filled)
+    .filter(({ slot }) => (network.upgrade.mode === "special" ? slot.filled : !slot.filled))
     .map(({ row }) => row);
 
-  if (empties.length === 0) {
+  if (targetRows.length === 0) {
     return;
   }
 
-  const currentIndex = Math.max(0, empties.indexOf(network.upgrade.selectedRow));
-  const nextIndex = (currentIndex + direction + empties.length) % empties.length;
-  network.upgrade.selectedRow = empties[nextIndex];
+  const currentIndex = Math.max(0, targetRows.indexOf(network.upgrade.selectedRow));
+  const nextIndex = (currentIndex + direction + targetRows.length) % targetRows.length;
+  network.upgrade.selectedRow = targetRows[nextIndex];
 }
 
 export function moveColumnSelection(network, direction) {
-  if (network.upgrade.mode !== "special") {
-    return;
-  }
-
-  const filledColumns = network.columns
+  const selectableColumns = network.columns
     .map((column, columnIndex) => ({ column, columnIndex }))
-    .filter(({ column }) => column.slots.some((slot) => slot.filled))
+    .filter(({ column }) =>
+      network.upgrade.mode === "special"
+        ? column.slots.some((slot) => slot.filled)
+        : column.slots.some((slot) => !slot.filled),
+    )
     .map(({ columnIndex }) => columnIndex);
 
-  if (filledColumns.length === 0) {
+  if (selectableColumns.length === 0) {
     return;
   }
 
-  const currentIndex = Math.max(0, filledColumns.indexOf(network.upgrade.selectedColumn));
-  const nextIndex = (currentIndex + direction + filledColumns.length) % filledColumns.length;
-  network.upgrade.selectedColumn = filledColumns[nextIndex];
+  const currentIndex = Math.max(0, selectableColumns.indexOf(network.upgrade.selectedColumn));
+  const nextIndex = (currentIndex + direction + selectableColumns.length) % selectableColumns.length;
+  network.upgrade.selectedColumn = selectableColumns[nextIndex];
 
   const nextColumn = network.columns[network.upgrade.selectedColumn];
-  const nextRow =
-    nextColumn.slots.findIndex((slot) => slot.filled) >= 0
-      ? nextColumn.slots.findIndex((slot) => slot.filled)
-      : 0;
-  network.upgrade.selectedRow = nextRow;
+  const rowIsSelectable = (row) => {
+    const slot = nextColumn.slots[row];
+    return network.upgrade.mode === "special" ? slot?.filled : !slot?.filled;
+  };
+
+  if (rowIsSelectable(network.upgrade.selectedRow)) {
+    return;
+  }
+
+  const selectableRows = nextColumn.slots
+    .map((slot, row) => ({ slot, row }))
+    .filter(({ slot }) => (network.upgrade.mode === "special" ? slot.filled : !slot.filled))
+    .map(({ row }) => row);
+
+  if (selectableRows.length === 0) {
+    network.upgrade.selectedRow = 0;
+    return;
+  }
+
+  let bestRow = selectableRows[0];
+  let bestDistance = Math.abs(bestRow - network.upgrade.selectedRow);
+  for (const row of selectableRows) {
+    const distance = Math.abs(row - network.upgrade.selectedRow);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestRow = row;
+    }
+  }
+  network.upgrade.selectedRow = bestRow;
 }
 
 function syncActiveColumn(network) {
   const firstIncomplete = network.columns.findIndex((column) => column.slots.some((slot) => !slot.filled));
   network.activeColumn = firstIncomplete === -1 ? network.columns.length - 1 : firstIncomplete;
-  network.upgradeCost = getUpgradeCostForColumn(network.activeColumn);
 }
 
 function resetSlot(slot, row, isFrontColumn) {
@@ -464,7 +495,7 @@ export function applyUpgradeToSelectedRow(network) {
     return true;
   }
 
-  const column = getActiveColumn(network);
+  const column = network.columns[network.upgrade.selectedColumn];
   const card = network.upgrade.pendingCard;
   const slot = column?.slots[network.upgrade.selectedRow];
 
@@ -486,17 +517,18 @@ export function applyUpgradeToSelectedRow(network) {
 
   const allExistingColumnsFilled = network.columns.every((existingColumn) => isColumnFilled(existingColumn));
 
-  if (allExistingColumnsFilled && network.columns.length < network.maxColumns) {
-    network.columns.push(createColumn(network.columns.length));
-    network.activeColumn = network.columns.length - 1;
-    network.upgradeCost = getUpgradeCostForColumn(network.activeColumn);
-  } else {
-    syncActiveColumn(network);
-  }
+    if (allExistingColumnsFilled && network.columns.length < network.maxColumns) {
+      network.columns.push(createColumn(network.columns.length));
+      network.activeColumn = network.columns.length - 1;
+    } else {
+      syncActiveColumn(network);
+    }
 
-  network.nextUpgradeScore += network.upgradeCost;
-  return true;
-}
+    network.upgradesPurchased += 1;
+    network.upgradeCost = getUpgradeCostForPurchase(network.upgradesPurchased);
+    network.nextUpgradeScore += network.upgradeCost;
+    return true;
+  }
 
 function pushUnique(list, values) {
   for (const value of values) {
@@ -514,10 +546,11 @@ function cloneSignal(signal) {
   return {
     energy: signal.energy,
     amp: signal.amp,
-    crit: signal.crit,
     fire: signal.fire,
-    electric: signal.electric,
     curse: signal.curse,
+    slow: signal.slow,
+    freeze: signal.freeze,
+    pushback: signal.pushback,
     penetration: signal.penetration,
     buffNames: [...signal.buffNames],
     buffShorts: [...signal.buffShorts],
@@ -534,10 +567,11 @@ function mergeSignals(signals) {
   const merged = {
     energy: 0,
     amp: 1,
-    crit: false,
     fire: false,
-    electric: false,
     curse: false,
+    slow: false,
+    freeze: false,
+    pushback: false,
     penetration: false,
     buffNames: [],
     buffShorts: [],
@@ -547,10 +581,11 @@ function mergeSignals(signals) {
   for (const signal of validSignals) {
     merged.energy += signal.energy;
     merged.amp *= signal.amp;
-    merged.crit = merged.crit || signal.crit;
     merged.fire = merged.fire || signal.fire;
-    merged.electric = merged.electric || signal.electric;
     merged.curse = merged.curse || signal.curse;
+    merged.slow = merged.slow || signal.slow;
+    merged.freeze = merged.freeze || signal.freeze;
+    merged.pushback = merged.pushback || signal.pushback;
     merged.penetration = merged.penetration || signal.penetration;
     pushUnique(merged.buffNames, signal.buffNames);
     pushUnique(merged.buffShorts, signal.buffShorts);
@@ -571,21 +606,31 @@ function decorateSignal(signal, slot) {
   return signal;
 }
 
-function createLocalSignal(slot, columnIndex, sourceColumnIndex, engineMultiplier) {
-  const receivesSource = columnIndex === sourceColumnIndex;
-  const contributesEnergy = receivesSource || columnIndex === 0 || slot.filled;
+function createLocalSignal(
+  slot,
+  row,
+  columnIndex,
+  sourceColumnIndex,
+  engineMultiplier,
+  hasIncomingSignal,
+  dispatchRow,
+) {
+  const receivesSource =
+    columnIndex === sourceColumnIndex && (dispatchRow == null || row === dispatchRow);
+  const contributesEnergy = receivesSource || hasIncomingSignal;
 
   if (!contributesEnergy) {
     return null;
   }
 
   const signal = {
-    energy: slot.baseEnergy * (receivesSource ? engineMultiplier : 1),
+    energy: (receivesSource ? SOURCE_ROW_ENERGY : slot.baseEnergy) * (receivesSource ? engineMultiplier : 1),
     amp: slot.damageMultiplier,
-    crit: slot.alwaysCrit,
     fire: slot.alwaysFire,
-    electric: slot.alwaysElectric,
     curse: slot.alwaysCurse,
+    slow: slot.alwaysSlow,
+    freeze: slot.alwaysFreeze,
+    pushback: slot.alwaysPushback,
     penetration: slot.alwaysPenetrate,
     buffNames: [],
     buffShorts: [],
@@ -656,7 +701,7 @@ function createForwardTarget(columnIndex, row) {
   if (columnIndex > 0) {
     return { type: "column", column: columnIndex - 1, row };
   }
-  return { type: "gun", row };
+  return { type: "gun", row: 0 };
 }
 
 export function cloneWeaponNetwork(network) {
@@ -702,7 +747,7 @@ export function createPreviewNetwork(network) {
     return preview;
   }
 
-  const column = preview.columns[preview.activeColumn];
+  const column = preview.columns[selectedColumn];
   const slot = column?.slots[selectedRow];
   if (!slot || slot.filled) {
     return preview;
@@ -717,10 +762,11 @@ export function createPreviewNetwork(network) {
   return preview;
 }
 
-export function resolveWeaponOutputs(network) {
+export function resolveWeaponOutputs(network, options = {}) {
   const nodes = createEmptyNodes(network.columns.length);
   const connections = [];
   const sourceColumnIndex = network.columns.length - 1;
+  const dispatchRow = options.dispatchRow ?? null;
   let incoming = Array.from({ length: ROWS }, () => null);
 
   for (let columnIndex = network.columns.length - 1; columnIndex >= 0; columnIndex -= 1) {
@@ -733,16 +779,23 @@ export function resolveWeaponOutputs(network) {
 
     for (let row = 0; row < ROWS; row += 1) {
       const slot = column.slots[row];
-      const active = columnIndex === 0 || columnIndex === sourceColumnIndex || slot.filled;
+      const active =
+        columnIndex === 0 ||
+        columnIndex === sourceColumnIndex ||
+        slot.filled ||
+        Boolean(incoming[row]);
       if (!active) {
         continue;
       }
 
       const localSignal = createLocalSignal(
         slot,
+        row,
         columnIndex,
         sourceColumnIndex,
         network.engineMultiplier,
+        Boolean(incoming[row]),
+        dispatchRow,
       );
       const combined = mergeSignals([incoming[row], localSignal]);
       if (!combined) {
@@ -763,7 +816,7 @@ export function resolveWeaponOutputs(network) {
       if (columnIndex === sourceColumnIndex && localSignal) {
         connections.push(
           buildConnection(
-            { type: "divider", row },
+            { type: "engine", row: 0 },
             { type: "column", column: sourceColumnIndex, row },
             localSignal,
           ),
@@ -900,10 +953,11 @@ export function resolveWeaponOutputs(network) {
       return {
         energy: signal.energy,
         damage: Math.max(1, Math.round(signal.energy * signal.amp * 10) / 10),
-        crit: signal.crit,
         fire: signal.fire,
-        electric: signal.electric,
         curse: signal.curse,
+        slow: signal.slow,
+        freeze: signal.freeze,
+        pushback: signal.pushback,
         penetration: signal.penetration,
         buffNames: signal.buffNames,
         buffShorts: signal.buffShorts,

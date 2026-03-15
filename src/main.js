@@ -10,6 +10,7 @@ import {
 } from "./game/weapon-network.js";
 import {
   backgroundParallaxSystem,
+  bossAttackSystem,
   cleanupSystem,
   collisionSystem,
   createAutoFireSystem,
@@ -39,10 +40,16 @@ world.resources = {
   score: 0,
   restartRequested: false,
   commitUpgrade: false,
+  dispatchRow: 0,
   signalTime: 0,
   enemySpawnTimer: 0,
   enemySpawnInterval: ENEMY.spawnInterval,
   weaponNetwork: createWeaponNetwork(),
+  pointer: {
+    x: 0,
+    y: 0,
+    active: false,
+  },
   input: {
     w: false,
     a: false,
@@ -112,11 +119,11 @@ function handleUpgradeInput(event) {
   const key = event.key.toLowerCase();
 
   if (upgrade.step === "card") {
-    if (event.code === "ArrowLeft" || event.code === "KeyA") {
+    if (event.code === "ArrowUp" || event.code === "KeyW") {
       moveCardSelection(world.resources.weaponNetwork, -1);
       return true;
     }
-    if (event.code === "ArrowRight" || event.code === "KeyD") {
+    if (event.code === "ArrowDown" || event.code === "KeyS") {
       moveCardSelection(world.resources.weaponNetwork, 1);
       return true;
     }
@@ -129,22 +136,20 @@ function handleUpgradeInput(event) {
   }
 
   if (upgrade.step === "slot") {
-    if (upgrade.mode === "special") {
-      if (event.code === "ArrowLeft" || event.code === "KeyA") {
-        moveColumnSelection(world.resources.weaponNetwork, -1);
-        return true;
-      }
-      if (event.code === "ArrowRight" || event.code === "KeyD") {
-        moveColumnSelection(world.resources.weaponNetwork, 1);
-        return true;
-      }
-    }
-
     if (event.code === "ArrowUp" || event.code === "KeyW") {
-      moveRowSelection(world.resources.weaponNetwork, -1);
+      moveColumnSelection(world.resources.weaponNetwork, -1);
       return true;
     }
     if (event.code === "ArrowDown" || event.code === "KeyS") {
+      moveColumnSelection(world.resources.weaponNetwork, 1);
+      return true;
+    }
+
+    if (event.code === "ArrowLeft" || event.code === "KeyA") {
+      moveRowSelection(world.resources.weaponNetwork, -1);
+      return true;
+    }
+    if (event.code === "ArrowRight" || event.code === "KeyD") {
       moveRowSelection(world.resources.weaponNetwork, 1);
       return true;
     }
@@ -190,9 +195,19 @@ function onKeyUp(event) {
 
 window.addEventListener("keydown", onKeyDown);
 window.addEventListener("keyup", onKeyUp);
+canvas.addEventListener("mousemove", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  world.resources.pointer.x = ((event.clientX - rect.left) / rect.width) * canvas.width;
+  world.resources.pointer.y = ((event.clientY - rect.top) / rect.height) * canvas.height;
+  world.resources.pointer.active = true;
+});
+canvas.addEventListener("mouseleave", () => {
+  world.resources.pointer.active = false;
+});
 
 window.addEventListener("blur", () => {
   clearDirectionalInput();
+  world.resources.pointer.active = false;
 });
 
 const systems = [
@@ -202,6 +217,7 @@ const systems = [
   createAutoFireSystem(),
   createEnemySpawnSystem(),
   enemyHomingSystem,
+  bossAttackSystem,
   movementSystem,
   enemyStatusSystem,
   collisionSystem,
