@@ -26,6 +26,17 @@ function getEnemyShape() {
   return shapes[Math.floor(Math.random() * shapes.length)];
 }
 
+function getEnemyVariant(shape) {
+  const variants = {
+    circle: "pod",
+    triangle: "drone",
+    square: "rack",
+    diamond: "display",
+    hex: "canister",
+  };
+  return variants[shape] ?? "pod";
+}
+
 function getMiniBossName(tier) {
   const names = [
     "Sir Bump",
@@ -45,6 +56,7 @@ export function createShip(world) {
   world.addComponent(ship, "Ship", {
     hp: SHIP.hp,
     maxHp: SHIP.hp,
+    shield: 0,
     controlSpeed: SHIP.controlSpeed,
     fireInterval: SHIP.fireInterval,
     fireTimer: 0,
@@ -156,7 +168,13 @@ export function createEnemy(world) {
     slowFactor: 0,
     freezeTimer: 0,
   });
-  world.addComponent(enemy, "Render", { type: "enemy", color: enemyColor(hp), shape: getEnemyShape() });
+  const shape = getEnemyShape();
+  world.addComponent(enemy, "Render", {
+    type: "enemy",
+    color: enemyColor(hp),
+    shape,
+    variant: getEnemyVariant(shape),
+  });
   return enemy;
 }
 

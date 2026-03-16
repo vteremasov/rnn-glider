@@ -1,6 +1,7 @@
 # rnn-glider
 
 `rnn-glider` is a dependency-free 2D canvas prototype built with plain JavaScript, ES modules, and a lightweight ECS.
+The current theme is a reactor-defense lab where a signal lattice powers one central discharge turret.
 
 ## Run locally
 
@@ -14,10 +15,10 @@ Then open `http://localhost:8080`.
 
 ## Current game loop
 
-- Move the ship with `W/A/S/D`
-- Auto-fire from 5 guns
-- Upgrade the weapon network through normal and miniboss reward cards
-- Survive enemy waves, minibosses, and the final boss
+- Move the defense core with `W/A/S/D`
+- Auto-fire from one central turret using routed signal bursts
+- Upgrade the relay lattice through normal and miniboss reward cards
+- Survive enemy waves, sub-cores, and the final rogue core
 
 ## Deploy
 

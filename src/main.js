@@ -30,6 +30,8 @@ canvas.width = GAME_WIDTH;
 canvas.height = GAME_HEIGHT;
 
 const world = new World();
+const themeTileset = new Image();
+themeTileset.src = "./assets/pixel-cyberpunk-interior/pixel_cyberpunk_interior_free_1.0.1/pixel-cyberpunk-interior.png";
 world.resources = {
   gameOver: false,
   bossSpawned: false,
@@ -63,7 +65,15 @@ world.resources = {
     alpha: Math.random() * 0.55 + 0.2,
     speed: 40 + Math.random() * 120,
   })),
+  theme: {
+    tileset: themeTileset,
+    ready: false,
+  },
 };
+
+themeTileset.addEventListener("load", () => {
+  world.resources.theme.ready = true;
+});
 
 createShip(world);
 

@@ -7,6 +7,7 @@ import {
   FREEZE_DURATION,
   PUSHBACK_BASE,
   PUSHBACK_PER_DAMAGE,
+  SHIELD_PASS_TARGET,
   SLOW_DURATION,
   SLOW_FACTOR,
   SOURCE_ROW_ENERGY,
@@ -33,6 +34,9 @@ function getSlotLocalBonus(slot) {
 
 function getEffectSummary(slot, buffs) {
   const effects = [...buffs];
+  if (slot?.shieldLens) {
+    effects.push(`CHG ${slot.shieldPasses ?? 0}/${SHIELD_PASS_TARGET}`);
+  }
   if (effects.length === 0) {
     return "None";
   }
@@ -118,6 +122,25 @@ function createHealthPickup(world, x, y) {
   world.addComponent(entity, "HealthPickup", { heal: HEALTH_PICKUP.heal });
   world.addComponent(entity, "Render", { type: "healthPickup", color: "#9cffb2" });
   return entity;
+}
+
+function applyShipDamage(world, ship, damage) {
+  let remaining = Math.max(0, damage);
+  if ((ship.shield ?? 0) > 0) {
+    const absorbed = Math.min(ship.shield, remaining);
+    ship.shield -= absorbed;
+    remaining -= absorbed;
+  }
+
+  if (remaining <= 0) {
+    return;
+  }
+
+  ship.hp -= remaining;
+  if (ship.hp <= 0) {
+    ship.hp = 0;
+    world.resources.gameOver = true;
+  }
 }
 
 function bounceBulletOffWalls(transform, body, bullet) {
@@ -276,7 +299,53 @@ function enemyDebuffColors(enemy) {
   return colors;
 }
 
-function drawShip(ctx, x, y, scale = 1) {
+function getThemeTileset(world) {
+  const theme = world.resources.theme;
+  if (!theme?.ready || !theme.tileset?.complete) {
+    return null;
+  }
+  return theme.tileset;
+}
+
+function drawThemeSprite(ctx, img, sprite, dx, dy, dw, dh) {
+  ctx.drawImage(img, sprite.sx, sprite.sy, sprite.sw, sprite.sh, dx, dy, dw, dh);
+}
+
+function drawThemedTurret(ctx, world, x, y, scale = 1) {
+  const img = getThemeTileset(world);
+  if (!img) {
+    return false;
+  }
+
+  const screenSprite = { sx: 416, sy: 224, sw: 64, sh: 64 };
+  const baseSprite = { sx: 448, sy: 128, sw: 64, sh: 32 };
+  const emitterSprite = { sx: 288, sy: 192, sw: 32, sh: 32 };
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(scale, scale);
+
+  ctx.fillStyle = "rgba(78, 220, 255, 0.18)";
+  ctx.beginPath();
+  ctx.ellipse(0, 16, 34, 14, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawThemeSprite(ctx, img, baseSprite, -30, 8, 60, 28);
+  drawThemeSprite(ctx, img, screenSprite, -28, -34, 56, 56);
+  drawThemeSprite(ctx, img, emitterSprite, -12, -54, 24, 24);
+
+  ctx.fillStyle = "#71d8ff";
+  ctx.fillRect(-4, -70, 8, 18);
+  ctx.fillStyle = "#c8f5ff";
+  ctx.fillRect(-2, -82, 4, 14);
+  ctx.fillStyle = "#20344f";
+  ctx.fillRect(-22, -2, 12, 22);
+  ctx.fillRect(10, -2, 12, 22);
+  ctx.restore();
+  return true;
+}
+
+function drawFallbackShip(ctx, x, y, scale = 1) {
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(scale, scale);
@@ -296,6 +365,14 @@ function drawShip(ctx, x, y, scale = 1) {
     ctx.fillRect(offsetX - 2.5, -38, 5, 12);
   }
   ctx.restore();
+}
+
+function drawShip(ctx, world, x, y, scale = 1) {
+  if (drawThemedTurret(ctx, world, x, y, scale)) {
+    return;
+  }
+
+  drawFallbackShip(ctx, x, y, scale);
 }
 
 function drawEnemyShape(ctx, shape, x, y, radius) {
@@ -339,6 +416,203 @@ function drawEnemyShape(ctx, shape, x, y, radius) {
   }
 
   ctx.arc(x, y, radius, 0, Math.PI * 2);
+}
+
+function drawThemedEnemy(ctx, world, render, enemy, x, y, radius) {
+  const img = getThemeTileset(world);
+  if (!img) {
+    return false;
+  }
+
+  const regularSprites = {
+    pod: { sx: 320, sy: 64, sw: 32, sh: 64, aspect: 0.72 },
+    drone: { sx: 192, sy: 64, sw: 64, sh: 64, aspect: 1.05 },
+    rack: { sx: 192, sy: 160, sw: 32, sh: 64, aspect: 0.7 },
+    display: { sx: 416, sy: 224, sw: 64, sh: 64, aspect: 1.02 },
+    canister: { sx: 288, sy: 192, sw: 32, sh: 32, aspect: 1 },
+  };
+
+  ctx.save();
+  ctx.translate(x, y);
+
+  if (enemy.isBoss || enemy.isMiniBoss) {
+    const coreSprite = enemy.isBoss
+      ? { sx: 480, sy: 224, sw: 64, sh: 64 }
+      : { sx: 448, sy: 224, sw: 64, sh: 64 };
+    const ringSprite = enemy.isBoss
+      ? { sx: 576, sy: 128, sw: 64, sh: 32 }
+      : { sx: 576, sy: 160, sw: 64, sh: 32 };
+
+    ctx.fillStyle = enemy.isBoss ? "rgba(255, 96, 164, 0.22)" : "rgba(255, 162, 104, 0.2)";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 1.08, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.rotate((world.resources.signalTime ?? 0) * (enemy.isBoss ? 0.4 : -0.6));
+    drawThemeSprite(ctx, img, ringSprite, -radius * 0.92, -radius * 0.48, radius * 1.84, radius * 0.96);
+    ctx.restore();
+    drawThemeSprite(ctx, img, coreSprite, -radius * 0.68, -radius * 0.68, radius * 1.36, radius * 1.36);
+    ctx.fillStyle = "rgba(18, 28, 52, 0.9)";
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.34, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+    return true;
+  }
+
+  const pulse = 0.88 + Math.sin((world.resources.signalTime ?? 0) * 4.2 + x * 0.01) * 0.12;
+  const glow = render.color;
+  const shell = "#19253a";
+  const shellDark = "#0d1625";
+  const trim = "#6d89b5";
+  const eye = mixColors([render.color, "#dff8ff"], "#dff8ff");
+
+  ctx.fillStyle = `${glow}22`;
+  ctx.beginPath();
+  ctx.arc(0, 0, radius * (1.02 + pulse * 0.04), 0, Math.PI * 2);
+  ctx.fill();
+
+  if (render.variant === "drone") {
+    ctx.fillStyle = shell;
+    ctx.beginPath();
+    ctx.moveTo(0, -radius);
+    ctx.lineTo(radius * 0.9, -radius * 0.15);
+    ctx.lineTo(radius * 0.48, radius * 0.92);
+    ctx.lineTo(-radius * 0.48, radius * 0.92);
+    ctx.lineTo(-radius * 0.9, -radius * 0.15);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = shellDark;
+    ctx.fillRect(-radius * 0.28, -radius * 0.22, radius * 0.56, radius * 0.78);
+    ctx.strokeStyle = trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-radius * 0.52, radius * 0.08);
+    ctx.lineTo(radius * 0.52, radius * 0.08);
+    ctx.moveTo(-radius * 0.34, -radius * 0.34);
+    ctx.lineTo(radius * 0.34, -radius * 0.34);
+    ctx.stroke();
+
+    ctx.fillStyle = eye;
+    ctx.globalAlpha = 0.7 + pulse * 0.24;
+    ctx.fillRect(-radius * 0.3, -radius * 0.55, radius * 0.6, radius * 0.16);
+    ctx.globalAlpha = 1;
+  } else if (render.variant === "rack") {
+    ctx.fillStyle = shell;
+    ctx.beginPath();
+    ctx.roundRect(-radius * 0.66, -radius * 0.92, radius * 1.32, radius * 1.84, radius * 0.16);
+    ctx.fill();
+
+    ctx.fillStyle = shellDark;
+    ctx.beginPath();
+    ctx.roundRect(-radius * 0.44, -radius * 0.66, radius * 0.88, radius * 1.22, radius * 0.12);
+    ctx.fill();
+
+    ctx.fillStyle = eye;
+    ctx.globalAlpha = 0.55 + pulse * 0.18;
+    for (let index = 0; index < 3; index += 1) {
+      ctx.fillRect(-radius * 0.28, -radius * 0.5 + index * radius * 0.36, radius * 0.56, radius * 0.12);
+    }
+    ctx.globalAlpha = 1;
+  } else if (render.variant === "display") {
+    ctx.fillStyle = shell;
+    ctx.beginPath();
+    ctx.moveTo(0, -radius);
+    ctx.lineTo(radius * 0.86, 0);
+    ctx.lineTo(0, radius);
+    ctx.lineTo(-radius * 0.86, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = shellDark;
+    ctx.beginPath();
+    ctx.moveTo(0, -radius * 0.54);
+    ctx.lineTo(radius * 0.46, 0);
+    ctx.lineTo(0, radius * 0.54);
+    ctx.lineTo(-radius * 0.46, 0);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-radius * 0.58, 0);
+    ctx.lineTo(radius * 0.58, 0);
+    ctx.moveTo(0, -radius * 0.58);
+    ctx.lineTo(0, radius * 0.58);
+    ctx.stroke();
+
+    ctx.fillStyle = eye;
+    ctx.globalAlpha = 0.64 + pulse * 0.2;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  } else if (render.variant === "canister") {
+    ctx.fillStyle = shell;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.84, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(-radius * 0.2, -radius * 1.02, radius * 0.4, radius * 0.28);
+    ctx.fillRect(-radius * 0.2, radius * 0.74, radius * 0.4, radius * 0.28);
+
+    ctx.strokeStyle = trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.56, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = eye;
+    ctx.globalAlpha = 0.56 + pulse * 0.24;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  } else {
+    ctx.fillStyle = shell;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.78, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = trim;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius * 0.56, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-radius * 0.74, -radius * 0.08);
+    ctx.lineTo(-radius * 1.02, radius * 0.16);
+    ctx.moveTo(radius * 0.74, -radius * 0.08);
+    ctx.lineTo(radius * 1.02, radius * 0.16);
+    ctx.moveTo(-radius * 0.28, radius * 0.76);
+    ctx.lineTo(-radius * 0.12, radius * 1.02);
+    ctx.moveTo(radius * 0.28, radius * 0.76);
+    ctx.lineTo(radius * 0.12, radius * 1.02);
+    ctx.stroke();
+
+    ctx.fillStyle = eye;
+    ctx.globalAlpha = 0.58 + pulse * 0.22;
+    ctx.beginPath();
+    ctx.arc(-radius * 0.22, -radius * 0.06, radius * 0.14, 0, Math.PI * 2);
+    ctx.arc(radius * 0.22, -radius * 0.06, radius * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  const sprite = regularSprites[render.variant] ?? regularSprites.pod;
+  drawThemeSprite(
+    ctx,
+    img,
+    sprite,
+    -radius * 0.34,
+    -radius * 0.38,
+    radius * 0.68,
+    radius * 0.68,
+  );
+  ctx.restore();
+  return true;
 }
 
 function drawGunChargeEffects(ctx, shipX, shipY, ship, outputs, signalTime) {
@@ -571,6 +845,24 @@ function getDisplayedDispatchState(world, network = world.resources.weaponNetwor
   };
 }
 
+function applyShieldPasses(ship, network, flow) {
+  for (let columnIndex = 0; columnIndex < network.columns.length; columnIndex += 1) {
+    for (let row = 0; row < network.rows; row += 1) {
+      const slot = network.columns[columnIndex]?.slots[row];
+      const node = flow.nodes[columnIndex]?.[row];
+      if (!slot?.shieldLens || !node?.active) {
+        continue;
+      }
+
+      slot.shieldPasses += 1;
+      while (slot.shieldPasses >= SHIELD_PASS_TARGET) {
+        slot.shieldPasses -= SHIELD_PASS_TARGET;
+        ship.shield = (ship.shield ?? 0) + 1;
+      }
+    }
+  }
+}
+
 function resolveDisplayedWeaponFlow(world, network = world.resources.weaponNetwork) {
   const displayState = getDisplayedDispatchState(world, network);
   const flow = resolveWeaponOutputs(network, { dispatchRow: displayState.dispatchRow });
@@ -735,38 +1027,327 @@ function getRotatedHoverPoint(pointer, translateX, translateY) {
   };
 }
 
+function drawBuffIcon(ctx, buffId, x, y, size, color) {
+  if (!buffId) {
+    return;
+  }
+
+  ctx.save();
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.max(1.5, size * 0.12);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  if (buffId === "divider_multiplier") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.18, y);
+    ctx.lineTo(x + size * 0.04, y);
+    ctx.lineTo(x + size * 0.34, y - size * 0.28);
+    ctx.moveTo(x + size * 0.04, y);
+    ctx.lineTo(x + size * 0.34, y + size * 0.28);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "merger_multiplier") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.34, y - size * 0.28);
+    ctx.lineTo(x - size * 0.04, y);
+    ctx.lineTo(x + size * 0.22, y);
+    ctx.moveTo(x - size * 0.34, y + size * 0.28);
+    ctx.lineTo(x - size * 0.04, y);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "fire") {
+    ctx.beginPath();
+    ctx.moveTo(x, y - size * 0.42);
+    ctx.quadraticCurveTo(x + size * 0.26, y - size * 0.08, x, y + size * 0.42);
+    ctx.quadraticCurveTo(x - size * 0.32, y + size * 0.02, x, y - size * 0.42);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "penetration") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.38, y);
+    ctx.lineTo(x + size * 0.14, y);
+    ctx.moveTo(x + size * 0.04, y - size * 0.18);
+    ctx.lineTo(x + size * 0.34, y);
+    ctx.lineTo(x + size * 0.04, y + size * 0.18);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "split") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.36, y);
+    ctx.lineTo(x - size * 0.04, y);
+    ctx.moveTo(x - size * 0.04, y);
+    ctx.lineTo(x + size * 0.32, y - size * 0.24);
+    ctx.moveTo(x - size * 0.04, y);
+    ctx.lineTo(x + size * 0.32, y + size * 0.24);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "ricochet") {
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.3, Math.PI * 0.15, Math.PI * 1.55);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.22, y - size * 0.24);
+    ctx.lineTo(x + size * 0.38, y - size * 0.28);
+    ctx.lineTo(x + size * 0.32, y - size * 0.12);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "shield") {
+    ctx.beginPath();
+    ctx.moveTo(x, y - size * 0.42);
+    ctx.lineTo(x - size * 0.34, y - size * 0.14);
+    ctx.lineTo(x - size * 0.22, y + size * 0.34);
+    ctx.lineTo(x + size * 0.22, y + size * 0.34);
+    ctx.lineTo(x + size * 0.34, y - size * 0.14);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "overdrive") {
+    ctx.beginPath();
+    ctx.moveTo(x, y - size * 0.42);
+    ctx.lineTo(x + size * 0.1, y - size * 0.06);
+    ctx.lineTo(x - size * 0.02, y - size * 0.06);
+    ctx.lineTo(x + size * 0.04, y + size * 0.42);
+    ctx.lineTo(x - size * 0.14, y + size * 0.04);
+    ctx.lineTo(x - size * 0.02, y + size * 0.04);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "uplink") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.34, y + size * 0.14);
+    ctx.lineTo(x + size * 0.22, y - size * 0.22);
+    ctx.moveTo(x + size * 0.06, y - size * 0.24);
+    ctx.lineTo(x + size * 0.24, y - size * 0.22);
+    ctx.lineTo(x + size * 0.18, y - size * 0.04);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "downlink") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.34, y - size * 0.14);
+    ctx.lineTo(x + size * 0.22, y + size * 0.22);
+    ctx.moveTo(x + size * 0.06, y + size * 0.24);
+    ctx.lineTo(x + size * 0.24, y + size * 0.22);
+    ctx.lineTo(x + size * 0.18, y + size * 0.04);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "curse") {
+    ctx.beginPath();
+    ctx.arc(x - size * 0.05, y, size * 0.26, Math.PI * 0.2, Math.PI * 1.8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + size * 0.08, y, size * 0.22, Math.PI * 0.2, Math.PI * 1.8);
+    ctx.fillStyle = "rgba(8, 14, 30, 0.94)";
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "slow") {
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.3, 0, Math.PI * 2);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y - size * 0.18);
+    ctx.moveTo(x, y);
+    ctx.lineTo(x + size * 0.14, y);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "freeze") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.34, y);
+    ctx.lineTo(x + size * 0.34, y);
+    ctx.moveTo(x, y - size * 0.34);
+    ctx.lineTo(x, y + size * 0.34);
+    ctx.moveTo(x - size * 0.24, y - size * 0.24);
+    ctx.lineTo(x + size * 0.24, y + size * 0.24);
+    ctx.moveTo(x - size * 0.24, y + size * 0.24);
+    ctx.lineTo(x + size * 0.24, y - size * 0.24);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "pushback") {
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.3, y);
+    ctx.lineTo(x - size * 0.08, y);
+    ctx.moveTo(x - size * 0.02, y - size * 0.18);
+    ctx.lineTo(x - size * 0.28, y);
+    ctx.lineTo(x - size * 0.02, y + size * 0.18);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "relay_multiplier") {
+    ctx.beginPath();
+    ctx.moveTo(x - size * 0.3, y);
+    ctx.lineTo(x - size * 0.04, y);
+    ctx.lineTo(x + size * 0.24, y - size * 0.2);
+    ctx.moveTo(x - size * 0.04, y);
+    ctx.lineTo(x + size * 0.24, y + size * 0.2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "engine_overclock") {
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.28, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y - size * 0.44);
+    ctx.lineTo(x, y - size * 0.18);
+    ctx.moveTo(x + size * 0.44, y);
+    ctx.lineTo(x + size * 0.18, y);
+    ctx.moveTo(x, y + size * 0.44);
+    ctx.lineTo(x, y + size * 0.18);
+    ctx.moveTo(x - size * 0.44, y);
+    ctx.lineTo(x - size * 0.18, y);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "reset_lens") {
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.28, Math.PI * 0.2, Math.PI * 1.85);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.12, y - size * 0.28);
+    ctx.lineTo(x + size * 0.34, y - size * 0.2);
+    ctx.lineTo(x + size * 0.18, y - size * 0.04);
+    ctx.fill();
+    ctx.restore();
+    return;
+  }
+
+  if (buffId === "empower_lens") {
+    ctx.beginPath();
+    ctx.moveTo(x, y - size * 0.4);
+    ctx.lineTo(x + size * 0.1, y - size * 0.08);
+    ctx.lineTo(x + size * 0.38, y - size * 0.08);
+    ctx.lineTo(x + size * 0.16, y + size * 0.08);
+    ctx.lineTo(x + size * 0.24, y + size * 0.4);
+    ctx.lineTo(x, y + size * 0.18);
+    ctx.lineTo(x - size * 0.24, y + size * 0.4);
+    ctx.lineTo(x - size * 0.16, y + size * 0.08);
+    ctx.lineTo(x - size * 0.38, y - size * 0.08);
+    ctx.lineTo(x - size * 0.1, y - size * 0.08);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+
+  ctx.restore();
+}
+
+function drawThemeBackdrop(ctx, world, canvas, sidebarWidth) {
+  const theme = world.resources.theme;
+  if (!theme?.ready || !theme.tileset?.complete) {
+    return false;
+  }
+
+  const img = theme.tileset;
+  const battleX = sidebarWidth;
+  const battleWidth = canvas.width - sidebarWidth;
+  const tileSize = 64;
+  const floorTile = { sx: 96, sy: 96, sw: 32, sh: 32 };
+  const wallTile = { sx: 64, sy: 0, sw: 32, sh: 32 };
+  const trimTile = { sx: 32, sy: 0, sw: 32, sh: 32 };
+
+  ctx.fillStyle = "#060913";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  for (let y = 0; y < canvas.height; y += tileSize) {
+    for (let x = battleX; x < canvas.width; x += tileSize) {
+      ctx.drawImage(
+        img,
+        floorTile.sx,
+        floorTile.sy,
+        floorTile.sw,
+        floorTile.sh,
+        x,
+        y,
+        tileSize,
+        tileSize,
+      );
+    }
+  }
+
+  for (let x = battleX; x < canvas.width; x += tileSize) {
+    ctx.drawImage(img, wallTile.sx, wallTile.sy, wallTile.sw, wallTile.sh, x, 0, tileSize, tileSize);
+    ctx.drawImage(img, wallTile.sx, wallTile.sy, wallTile.sw, wallTile.sh, x, tileSize, tileSize, tileSize);
+  }
+
+  for (let y = 0; y < canvas.height; y += tileSize) {
+    ctx.drawImage(img, trimTile.sx, trimTile.sy, trimTile.sw, trimTile.sh, battleX, y, tileSize, tileSize);
+  }
+
+  ctx.fillStyle = "rgba(5, 10, 20, 0.72)";
+  ctx.fillRect(0, 0, sidebarWidth, canvas.height);
+  ctx.fillStyle = "rgba(7, 15, 30, 0.62)";
+  ctx.fillRect(battleX, 0, battleWidth, tileSize * 1.6);
+
+  const deco = [
+    { sx: 288, sy: 256, sw: 64, sh: 32, dx: 28, dy: 24, dw: 192, dh: 96 },
+    { sx: 352, sy: 256, sw: 64, sh: 32, dx: 244, dy: 24, dw: 192, dh: 96 },
+    { sx: 192, sy: 128, sw: 96, sh: 64, dx: 32, dy: 310, dw: 240, dh: 160 },
+    { sx: 416, sy: 256, sw: 64, sh: 32, dx: 288, dy: 310, dw: 192, dh: 96 },
+    { sx: 192, sy: 224, sw: 64, sh: 96, dx: battleX + 56, dy: 38, dw: 128, dh: 192 },
+    { sx: 448, sy: 0, sw: 96, sh: 32, dx: battleX + battleWidth - 260, dy: 28, dw: 220, dh: 72 },
+  ];
+
+  for (const sprite of deco) {
+    ctx.drawImage(img, sprite.sx, sprite.sy, sprite.sw, sprite.sh, sprite.dx, sprite.dy, sprite.dw, sprite.dh);
+  }
+
+  ctx.fillStyle = "rgba(32, 220, 255, 0.08)";
+  ctx.fillRect(battleX, 0, battleWidth, canvas.height);
+  return true;
+}
+
 function drawNodeGlyph(ctx, slot, x, y, slotRadius, strokeColor) {
   if (!slot?.filled) {
     return;
   }
 
-  ctx.save();
-  ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = Math.max(1.5, slotRadius * 0.12);
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
-
-  if (slot.dividerMultiplier) {
-    ctx.beginPath();
-    ctx.moveTo(x - slotRadius * 0.18, y);
-    ctx.lineTo(x + slotRadius * 0.04, y);
-    ctx.lineTo(x + slotRadius * 0.34, y - slotRadius * 0.28);
-    ctx.moveTo(x + slotRadius * 0.04, y);
-    ctx.lineTo(x + slotRadius * 0.34, y + slotRadius * 0.28);
-    ctx.stroke();
-  }
-
-  if (slot.mergerMultiplier) {
-    ctx.beginPath();
-    ctx.moveTo(x - slotRadius * 0.34, y - slotRadius * 0.28);
-    ctx.lineTo(x - slotRadius * 0.04, y);
-    ctx.lineTo(x + slotRadius * 0.22, y);
-    ctx.moveTo(x - slotRadius * 0.34, y + slotRadius * 0.28);
-    ctx.lineTo(x - slotRadius * 0.04, y);
-    ctx.stroke();
-  }
-
-  ctx.restore();
+  drawBuffIcon(ctx, slot.buffId, x, y, slotRadius, strokeColor);
 }
 
 function formatBuildSummary(network) {
@@ -812,9 +1393,9 @@ function drawVictoryOverlay(ctx, canvas, world) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "bold 38px Trebuchet MS, sans-serif";
-  ctx.fillText("BOSS DESTROYED", canvas.width * 0.5, 110);
+  ctx.fillText("THREAT NEUTRALIZED", canvas.width * 0.5, 110);
   ctx.font = "22px Trebuchet MS, sans-serif";
-  ctx.fillText("Final build", canvas.width * 0.5, 152);
+  ctx.fillText("Facility Stabilized", canvas.width * 0.5, 152);
 
   ctx.fillStyle = "rgba(8, 14, 30, 0.92)";
   ctx.strokeStyle = "rgba(149, 189, 255, 0.28)";
@@ -876,15 +1457,15 @@ function drawVictoryOverlay(ctx, canvas, world) {
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.font = "bold 24px Trebuchet MS, sans-serif";
-  ctx.fillText("Final Model", rightX + 18, rightY + 18);
+  ctx.fillText("Final Lattice", rightX + 18, rightY + 18);
   ctx.font = "16px Trebuchet MS, sans-serif";
   ctx.fillStyle = "#dbe8ff";
-  ctx.fillText("Hover a neuron to inspect its path and effects.", rightX + 18, rightY + 58);
-  ctx.fillText(`Columns: ${network.columns.length}/${network.maxColumns}`, rightX + 18, rightY + 90);
-  ctx.fillText(`Engine: ${(BASE_ENGINE_ENERGY * (network.engineMultiplier ?? 1)).toFixed(1)}`, rightX + 18, rightY + 114);
-  ctx.fillText(`Burst shots: ${burstOutputs.length}`, rightX + 18, rightY + 138);
+  ctx.fillText("Hover a relay to inspect active paths and effects.", rightX + 18, rightY + 58);
+  ctx.fillText(`Relay Columns: ${network.columns.length}/${network.maxColumns}`, rightX + 18, rightY + 90);
+  ctx.fillText(`Reactor Output: ${(BASE_ENGINE_ENERGY * (network.engineMultiplier ?? 1)).toFixed(1)}`, rightX + 18, rightY + 114);
+  ctx.fillText(`Burst Output: ${burstOutputs.length}`, rightX + 18, rightY + 138);
   ctx.fillText(
-    `Primary output: ${primaryOutput ? primaryOutput.damage.toFixed(1) : "0.0"}`,
+    `Primary Discharge: ${primaryOutput ? primaryOutput.damage.toFixed(1) : "0.0"}`,
     rightX + 18,
     rightY + 162,
   );
@@ -895,7 +1476,7 @@ function drawVictoryOverlay(ctx, canvas, world) {
   ctx.font = "18px Trebuchet MS, sans-serif";
   ctx.fillText(`Score ${world.resources.score}`, canvas.width * 0.5, panelY + panelHeight + 34);
   ctx.font = "20px Trebuchet MS, sans-serif";
-  ctx.fillText("Press R to restart or hover the model to inspect signal paths.", canvas.width * 0.5, panelY + panelHeight + 72);
+  ctx.fillText("Press R to reboot or hover the lattice to inspect signal paths.", canvas.width * 0.5, panelY + panelHeight + 72);
 }
 
 function drawGunEndpoint(ctx, x, y, scale, activeColor) {
@@ -1444,12 +2025,12 @@ function drawWeaponGrid(ctx, world, layout) {
       );
 
       if (showNodeLabels) {
-        const labelSize = slot.filled && String(slot.buffShort).length > 3
-          ? Math.max(8, (layout.labelSize ?? 11) - 2)
-          : layout.labelSize ?? 11;
-        ctx.fillStyle = slot.filled ? "#f4fbff" : "#8ea4ca";
-        ctx.font = `${labelSize}px Trebuchet MS, sans-serif`;
-        ctx.fillText(slot.filled ? slot.buffShort : columnIndex === 0 ? "G" : String(slot.baseEnergy), x, y);
+        if (!slot.filled) {
+          const labelSize = layout.labelSize ?? 11;
+          ctx.fillStyle = "#8ea4ca";
+          ctx.font = `${labelSize}px Trebuchet MS, sans-serif`;
+          ctx.fillText(columnIndex === 0 ? "G" : String(slot.baseEnergy), x, y);
+        }
       }
 
       if (nodeFlow?.active && layout.showNodeStats !== false) {
@@ -1575,22 +2156,22 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.font = "bold 26px Trebuchet MS, sans-serif";
-  ctx.fillText(upgrade.mode === "special" ? "Special Upgrade" : "Upgrade Phase", rightX + 14, rightY);
+  ctx.fillText(upgrade.mode === "special" ? "Special Retrofit" : "Calibration Phase", rightX + 14, rightY);
   ctx.font = "16px Trebuchet MS, sans-serif";
 
   if (upgrade.step === "card") {
     ctx.fillText(
       upgrade.mode === "special"
-        ? "Choose a special reward: W/S or Up/Down, Enter confirms, 1/2/3 for direct pick."
-        : "Choose a card: W/S or Up/Down, Enter confirms, 1/2/3 for direct pick.",
+        ? "Choose a special retrofit: W/S or Up/Down, Enter confirms, 1/2/3 for direct pick."
+        : "Choose a module: W/S or Up/Down, Enter confirms, 1/2/3 for direct pick.",
       rightX + 14,
       rightY + 40,
     );
   } else {
     ctx.fillText(
       upgrade.mode === "special"
-        ? "Choose an existing lens: Left/Right moves rows, Up/Down moves depth, Enter applies."
-        : "Choose any empty lens: Left/Right moves rows, Up/Down moves depth, Enter applies.",
+        ? "Choose an existing relay: Left/Right moves rows, Up/Down moves depth, Enter applies."
+        : "Choose any empty relay: Left/Right moves rows, Up/Down moves depth, Enter applies.",
       rightX + 14,
       rightY + 40,
     );
@@ -1621,14 +2202,20 @@ function drawUpgradeOverlay(ctx, canvas, world) {
       ctx.fillText("SPECIAL", x + 18, y + 16);
     }
 
+    ctx.fillStyle = "rgba(255, 255, 255, 0.06)";
+    ctx.beginPath();
+    ctx.roundRect(x + 16, y + (card.special ? 44 : 18), 44, 44, 12);
+    ctx.fill();
+    drawBuffIcon(ctx, card.id, x + 38, y + (card.special ? 66 : 40), 18, card.color);
+
     ctx.fillStyle = card.color;
     ctx.font = "bold 24px Trebuchet MS, sans-serif";
-    ctx.fillText(`${index + 1}. ${card.name}`, x + 18, y + (card.special ? 44 : 18));
+    ctx.fillText(`${index + 1}. ${card.name}`, x + 74, y + (card.special ? 44 : 18));
     ctx.fillStyle = "#dbe8ff";
     ctx.font = "16px Trebuchet MS, sans-serif";
-    const descriptionLines = wrapText(ctx, card.description, cardWidth - 36);
+    const descriptionLines = wrapText(ctx, card.description, cardWidth - 92);
     for (let lineIndex = 0; lineIndex < descriptionLines.length; lineIndex += 1) {
-      ctx.fillText(descriptionLines[lineIndex], x + 18, y + (card.special ? 88 : 62) + lineIndex * 22);
+      ctx.fillText(descriptionLines[lineIndex], x + 74, y + (card.special ? 88 : 62) + lineIndex * 22);
     }
   }
 
@@ -1692,9 +2279,9 @@ function drawUpgradeOverlay(ctx, canvas, world) {
   ctx.fillStyle = "#dbe8ff";
   ctx.font = "16px Trebuchet MS, sans-serif";
   ctx.fillText(
-    upgrade.mode === "special"
-      ? "MiniBoss reward: choose one special upgrade."
-      : `Column ${network.activeColumn + 1}/${network.maxColumns}   Next cost: ${network.upgradeCost}`,
+      upgrade.mode === "special"
+      ? "Sub-core reward: choose one special retrofit."
+      : `Focused column ${network.activeColumn + 1}/${network.maxColumns}   Next cost: ${network.upgradeCost}`,
     rightX + 14,
     shellY + shellHeight - 46,
   );
@@ -1782,7 +2369,8 @@ export function createAutoFireSystem() {
 
     const network = world.resources.weaponNetwork;
     const dispatchRow = world.resources.dispatchRow ?? 0;
-    const outputs = resolveWeaponOutputs(network, { dispatchRow }).outputs;
+    const flow = resolveWeaponOutputs(network, { dispatchRow });
+    const outputs = flow.outputs;
 
     for (const entity of world.query("Ship", "Transform")) {
       const ship = world.getComponent(entity, "Ship");
@@ -1793,6 +2381,7 @@ export function createAutoFireSystem() {
       if ((!ship.pendingShots || ship.pendingShots.length === 0) && ship.fireTimer >= ship.fireInterval) {
         ship.fireTimer = 0;
         ship.activeVolleyRow = dispatchRow;
+        applyShieldPasses(ship, network, flow);
         ship.pendingShots = outputs
           .map((stats, row) => (stats ? { ...stats, row, color: bulletColor(stats) } : null))
           .filter(Boolean);
@@ -2108,13 +2697,9 @@ export function collisionSystem(world) {
         continue;
       }
 
-      ship.hp -= bullet.damage ?? 1;
+      applyShipDamage(world, ship, bullet.damage ?? 1);
       ship.contactCooldown = 0.6;
       world.destroyEntity(bulletEntity);
-      if (ship.hp <= 0) {
-        ship.hp = 0;
-        world.resources.gameOver = true;
-      }
       break;
     }
   }
@@ -2128,14 +2713,10 @@ export function collisionSystem(world) {
         continue;
       }
 
-      ship.hp -= 1;
+      applyShipDamage(world, ship, 1);
       ship.contactCooldown = 0.6;
       if (!enemy.isBoss && !enemy.isMiniBoss) {
         world.destroyEntity(enemyEntity);
-      }
-      if (ship.hp <= 0) {
-        ship.hp = 0;
-        world.resources.gameOver = true;
       }
       break;
     }
@@ -2150,16 +2731,12 @@ export function collisionSystem(world) {
         continue;
       }
 
-      ship.hp -= 1;
+      applyShipDamage(world, ship, 1);
       ship.contactCooldown = 0.6;
       if (!enemy.isBoss && !enemy.isMiniBoss) {
         world.destroyEntity(enemyEntity);
       } else {
         enemyPos.y = GAME_HEIGHT - enemyBody.radius;
-      }
-      if (ship.hp <= 0) {
-        ship.hp = 0;
-        world.resources.gameOver = true;
       }
       break;
     }
@@ -2287,18 +2864,22 @@ export function createRenderSystem(ctx, canvas) {
     const sidebarWidth = LAYOUT.sidebarWidth;
     const panelPadding = LAYOUT.panelPadding;
     world.resources.signalTime += 1 / 60;
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const themed = drawThemeBackdrop(ctx, world, canvas, sidebarWidth);
+    if (!themed) {
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    for (const star of world.resources.stars) {
-      ctx.globalAlpha = star.alpha;
-      ctx.fillStyle = "#c5d4ff";
-      ctx.fillRect(star.x, star.y, star.size, star.size);
+      for (const star of world.resources.stars) {
+        ctx.globalAlpha = star.alpha;
+        ctx.fillStyle = "#c5d4ff";
+        ctx.fillRect(star.x, star.y, star.size, star.size);
+      }
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = "rgba(5, 10, 20, 0.86)";
+      ctx.fillRect(0, 0, sidebarWidth, canvas.height);
     }
-    ctx.globalAlpha = 1;
 
-    ctx.fillStyle = "rgba(5, 10, 20, 0.86)";
-    ctx.fillRect(0, 0, sidebarWidth, canvas.height);
     ctx.strokeStyle = "rgba(126, 170, 232, 0.28)";
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -2311,8 +2892,17 @@ export function createRenderSystem(ctx, canvas) {
       const transform = world.getComponent(entity, "Transform");
 
       if (render.type === "ship") {
-        drawShip(ctx, transform.x, transform.y, SHIP.renderScale);
+        drawShip(ctx, world, transform.x, transform.y, SHIP.renderScale);
         const ship = world.getComponent(entity, "Ship");
+        if ((ship.shield ?? 0) > 0) {
+          ctx.strokeStyle = "#9ed0ff";
+          ctx.lineWidth = 4;
+          ctx.globalAlpha = 0.24 + Math.min(0.5, ship.shield * 0.08);
+          ctx.beginPath();
+          ctx.arc(transform.x, transform.y, SHIP.radius * 1.35, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+        }
         drawGunChargeEffects(
           ctx,
           transform.x,
@@ -2411,16 +3001,20 @@ export function createRenderSystem(ctx, canvas) {
       if (render.type === "enemy") {
         const body = world.getComponent(entity, "CircleCollider");
         const enemy = world.getComponent(entity, "Enemy");
-        ctx.fillStyle = render.color;
-        ctx.beginPath();
-        drawEnemyShape(
-          ctx,
-          enemy.isBoss || enemy.isMiniBoss ? "circle" : render.shape,
-          transform.x,
-          transform.y,
-          body.radius,
-        );
-        ctx.fill();
+        const usedThemeEnemy = drawThemedEnemy(ctx, world, render, enemy, transform.x, transform.y, body.radius);
+
+        if (!usedThemeEnemy) {
+          ctx.fillStyle = render.color;
+          ctx.beginPath();
+          drawEnemyShape(
+            ctx,
+            enemy.isBoss || enemy.isMiniBoss ? "circle" : render.shape,
+            transform.x,
+            transform.y,
+            body.radius,
+          );
+          ctx.fill();
+        }
 
         if (enemy.isBoss) {
           ctx.strokeStyle = "#ffd6e4";
@@ -2438,12 +3032,12 @@ export function createRenderSystem(ctx, canvas) {
           ctx.strokeStyle = mixColors(debuffColors, "#f1f6ff");
           ctx.lineWidth = enemy.isBoss ? 10 : enemy.isMiniBoss ? 7 : 4;
           ctx.beginPath();
-          drawEnemyShape(
-            ctx,
-            enemy.isBoss || enemy.isMiniBoss ? "circle" : render.shape,
+          ctx.arc(
             transform.x,
             transform.y,
             body.radius + (enemy.isBoss ? 9 : enemy.isMiniBoss ? 7 : 5),
+            0,
+            Math.PI * 2,
           );
           ctx.stroke();
         }
@@ -2458,7 +3052,7 @@ export function createRenderSystem(ctx, canvas) {
         ctx.textBaseline = "middle";
         const centerLabel =
           enemy.isBoss || enemy.isMiniBoss
-            ? enemy.bossName ?? (enemy.isBoss ? "Boss Core" : "MiniBoss")
+            ? enemy.bossName ?? (enemy.isBoss ? "Rogue Core" : "Sub-Core")
             : String(Math.ceil(enemy.hp));
         ctx.fillText(centerLabel, transform.x, transform.y);
       }
@@ -2477,7 +3071,7 @@ export function createRenderSystem(ctx, canvas) {
     }
 
 	    const shipEntity = world.query("Ship")[0];
-	    const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : { hp: 0, maxHp: 0 };
+	    const ship = shipEntity ? world.getComponent(shipEntity, "Ship") : { hp: 0, maxHp: 0, shield: 0 };
 	    const network = world.resources.weaponNetwork;
     const displayState = getDisplayedDispatchState(world, network);
 
@@ -2485,31 +3079,32 @@ export function createRenderSystem(ctx, canvas) {
     ctx.font = "bold 24px Trebuchet MS, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText("Stats", panelPadding, panelPadding);
+    ctx.fillText("Facility Stats", panelPadding, panelPadding);
 
     ctx.fillStyle = "#e4eeff";
     ctx.font = "16px Trebuchet MS, sans-serif";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(`Ship HP: ${ship.hp}/${ship.maxHp}`, panelPadding, panelPadding + 40);
-    ctx.fillText(`Score: ${world.resources.score}`, panelPadding, panelPadding + 62);
-    ctx.fillText(`Move: W/A/S/D`, panelPadding, panelPadding + 84);
+    ctx.fillText(`Core Integrity: ${ship.hp}/${ship.maxHp}`, panelPadding, panelPadding + 40);
+    ctx.fillText(`Barrier: ${ship.shield ?? 0}`, panelPadding, panelPadding + 62);
+    ctx.fillText(`Score: ${world.resources.score}`, panelPadding, panelPadding + 84);
+    ctx.fillText(`Controls: W/A/S/D`, panelPadding, panelPadding + 106);
 	    ctx.fillText(
-	      `Signal row: ${displayState.dispatchRow + 1}`,
+	      `Active Channel: ${displayState.dispatchRow + 1}`,
 	      panelPadding,
-	      panelPadding + 106,
+	      panelPadding + 128,
 	    );
-    ctx.fillText(`Next upgrade: ${network.nextUpgradeScore}`, panelPadding, panelPadding + 128);
-    ctx.fillText(`Columns: ${network.columns.length}/${network.maxColumns}`, panelPadding, panelPadding + 150);
+    ctx.fillText(`Next upgrade: ${network.nextUpgradeScore}`, panelPadding, panelPadding + 150);
+    ctx.fillText(`Relay Columns: ${network.columns.length}/${network.maxColumns}`, panelPadding, panelPadding + 172);
     ctx.fillText(
-      `Threat tier: ${countCompletedColumns(network) + (world.resources.minibossesDefeated ?? 0) * 2}`,
-      panelPadding,
-      panelPadding + 172,
-    );
-    ctx.fillText(
-      `Minibosses: ${world.resources.minibossesDefeated ?? 0}/${network.maxColumns - 1}`,
+      `Containment Tier: ${countCompletedColumns(network) + (world.resources.minibossesDefeated ?? 0) * 2}`,
       panelPadding,
       panelPadding + 194,
+    );
+    ctx.fillText(
+      `Sub-Cores Cleared: ${world.resources.minibossesDefeated ?? 0}/${network.maxColumns - 1}`,
+      panelPadding,
+      panelPadding + 216,
     );
 
     const modelTop = 306;
@@ -2524,7 +3119,7 @@ export function createRenderSystem(ctx, canvas) {
 
     ctx.fillStyle = "#f3f8ff";
     ctx.font = "bold 24px Trebuchet MS, sans-serif";
-    ctx.fillText("Model", panelPadding, 262);
+    ctx.fillText("Relay Lattice", panelPadding, 262);
 
     const mainModelTranslateX = panelPadding + 18;
     const mainModelTranslateY = canvas.height - panelPadding + 30;
@@ -2606,7 +3201,7 @@ export function createRenderSystem(ctx, canvas) {
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.font = "bold 16px Trebuchet MS, sans-serif";
-      ctx.fillText(boss.bossName ?? "Boss Core", x, y - 2);
+      ctx.fillText(boss.bossName ?? "Rogue Core", x, y - 2);
     }
 
     if (
@@ -2628,9 +3223,9 @@ export function createRenderSystem(ctx, canvas) {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.font = "bold 42px Trebuchet MS, sans-serif";
-      ctx.fillText("GAME OVER", canvas.width * 0.5, canvas.height * 0.45);
+      ctx.fillText("CORE BREACH", canvas.width * 0.5, canvas.height * 0.45);
       ctx.font = "22px Trebuchet MS, sans-serif";
-      ctx.fillText("Press R to restart", canvas.width * 0.5, canvas.height * 0.56);
+      ctx.fillText("Press R to reboot the facility", canvas.width * 0.5, canvas.height * 0.56);
     }
   };
 }

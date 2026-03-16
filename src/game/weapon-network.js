@@ -13,6 +13,7 @@ export const CURSE_DAMAGE_FACTOR = 0.16;
 export const UPGRADE_FLAT_DAMAGE = 2;
 export const SPLIT_ANGLE_DEGREES = 45;
 export const RICOCHET_BOUNCES = 5;
+export const SHIELD_PASS_TARGET = 5;
 const DIVIDER_SPLIT_SHARE = 0.5;
 const DIVIDER_BONUS_STEP = 0.1;
 const MERGER_PULL_SHARE = 0.5;
@@ -106,6 +107,16 @@ export const BUFF_LIBRARY = [
     color: "#7ac8ff",
     apply(slot) {
       slot.alwaysRicochet = true;
+    },
+  },
+  {
+    id: "shield",
+    name: `Shield Lens ${SHIELD_PASS_TARGET}x`,
+    short: "SHLD",
+    description: withFlatDamage(`Does not change the signal. Every ${SHIELD_PASS_TARGET} signal passes through this lens grants the ship 1 shield.`),
+    color: "#9ed0ff",
+    apply(slot) {
+      slot.shieldLens = true;
     },
   },
   {
@@ -239,6 +250,8 @@ function createSlot(row, isFrontColumn) {
     alwaysPenetrate: false,
     alwaysSplit: false,
     alwaysRicochet: false,
+    shieldLens: false,
+    shieldPasses: 0,
     relayMultiplier: false,
     dividerMultiplier: false,
     mergerMultiplier: false,
