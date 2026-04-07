@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    />
+    <title>Neural Bastion Admin</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #14171d;
+        --panel: #1c222b;
+        --panel-2: #232a34;
+        --line: rgba(246, 248, 251, 0.12);
+        --text: #eef1f6;
+        --text-dim: #b1bbc9;
+        --accent: #8fd8ff;
+        --warn: #ffd89a;
+        --good: #95c19c;
+        --bad: #d27a67;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at top, rgba(143, 216, 255, 0.08), transparent 28%),
+          linear-gradient(180deg, #1d232b, var(--bg) 52%, #101318);
+        color: var(--text);
+        font: 14px/1.45 "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+      }
+
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .shell {
+        width: min(1240px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 24px 0 48px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+      }
+
+      .title h1 {
+        margin: 0;
+        font-size: 28px;
+      }
+
+      .title p {
+        margin: 6px 0 0;
+        color: var(--text-dim);
+      }
+
+      .linkbar {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .linkbar a {
+        padding: 10px 14px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(28, 34, 43, 0.84);
+      }
+
+      .grid {
+        display: grid;
+        gap: 18px;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: rgba(28, 34, 43, 0.92);
+        padding: 18px;
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
+      }
+
+      .panel h2 {
+        margin: 0 0 12px;
+        font-size: 20px;
+      }
+
+      .panel h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .muted {
+        color: var(--text-dim);
+      }
+
+      input,
+      textarea,
+      select,
+      button {
+        font: inherit;
+        color: var(--text);
+      }
+
+      input,
+      textarea,
+      select {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(16, 20, 26, 0.92);
+        padding: 10px 12px;
+      }
+
+      textarea {
+        min-height: 72px;
+        resize: vertical;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(36, 45, 56, 0.96);
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: rgba(143, 216, 255, 0.34);
+        background: rgba(44, 69, 92, 0.96);
+      }
+
+      .roadmap {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .roadmap-stack {
+        display: grid;
+        gap: 18px;
+      }
+
+      .done-section {
+        border-top: 1px solid var(--line);
+        padding-top: 16px;
+      }
+
+      .done-section h4 {
+        margin: 0 0 12px;
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+      }
+
+      .lane {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(20, 24, 31, 0.88);
+        padding: 12px;
+        min-height: 180px;
+      }
+
+      .lane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+
+      .task-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .task {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: rgba(30, 36, 44, 0.94);
+        padding: 10px;
+      }
+
+      .task.is-done {
+        border-color: rgba(149, 193, 156, 0.34);
+        background: linear-gradient(180deg, rgba(28, 48, 34, 0.92), rgba(22, 31, 27, 0.94));
+        box-shadow: inset 0 0 0 1px rgba(149, 193, 156, 0.08);
+      }
+
+      .task strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .card-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .card-head strong {
+        margin: 0;
+      }
+
+      .card-body {
+        display: grid;
+        gap: 8px;
+      }
+
+      .card-text {
+        color: var(--text-dim);
+        white-space: pre-wrap;
+      }
+
+      .done-mark {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid rgba(149, 193, 156, 0.28);
+        border-radius: 999px;
+        padding: 2px 8px;
+        font-size: 11px;
+        color: var(--good);
+      }
+
+      .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 8px 0;
+      }
+
+      .chip {
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 3px 8px;
+        font-size: 12px;
+        color: var(--text-dim);
+      }
+
+      .task-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 10px;
+      }
+
+      .catalog {
+        display: grid;
+        gap: 18px;
+      }
+
+      .tabbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-bottom: 14px;
+      }
+
+      .section-tools {
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        margin-bottom: 12px;
+      }
+
+      .tabbar button.active {
+        border-color: rgba(143, 216, 255, 0.36);
+        background: rgba(44, 69, 92, 0.96);
+      }
+
+      .catalog-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .catalog-item {
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        background: rgba(20, 24, 31, 0.9);
+        padding: 12px;
+      }
+
+      .catalog-item header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 6px;
+      }
+
+      .catalog-item small {
+        color: var(--warn);
+      }
+
+      .edit-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .stats {
+        color: var(--text-dim);
+        font-size: 13px;
+      }
+
+      @media (max-width: 980px) {
+        .roadmap,
+        .catalog {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="topbar">
+        <div class="title">
+          <h1>Neural Bastion Admin</h1>
+          <p>Ideas, roadmap, upgrade catalog, and legendary reference.</p>
+        </div>
+        <div class="linkbar">
+          <a href="/">Open Game</a>
+          <a href="/#dev" target="_blank" rel="noopener noreferrer">Open Game Dev</a>
+          <a href="/#debug">Open Game Debug</a>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="panel">
+          <h2>Current Rules</h2>
+          <div class="chip-row">
+            <span class="chip">Every applied upgrade: +1 white route damage</span>
+            <span class="chip">Max merge level per node: 3</span>
+            <span class="chip">Boss branch depth: 13</span>
+            <span class="chip">Pre-boss fork: Shop / Camp</span>
+          </div>
+        </section>
+
+        <section class="panel catalog">
+          <h2>Admin</h2>
+          <div class="tabbar" role="tablist" aria-label="Catalog tabs">
+            <button type="button" data-tab="roadmap" class="active" role="tab" aria-selected="true">Roadmap</button>
+            <button type="button" data-tab="upgrades" role="tab" aria-selected="false">Upgrades</button>
+            <button type="button" data-tab="legendary" role="tab" aria-selected="false">Legendary Items</button>
+          </div>
+          <div class="toolbar">
+            <button id="copy-json" class="primary" type="button">Copy JSON</button>
+            <button id="reset-draft" type="button">Reset Draft</button>
+          </div>
+          <p class="muted">Edits here are local admin drafts. Copy the JSON and send it to Codex to apply real code changes.</p>
+
+          <section id="catalog-roadmap">
+            <h3>Roadmap</h3>
+            <div class="section-tools">
+              <p class="muted">Current backlog and progress tracking.</p>
+              <button id="add-roadmap-item" type="button">Add Task</button>
+            </div>
+            <div class="roadmap" id="roadmap" style="margin-top: 16px;"></div>
+          </section>
+
+          <section id="catalog-upgrades" hidden>
+            <h3>Upgrade Catalog</h3>
+            <div id="upgrade-list" class="catalog-list"></div>
+          </section>
+
+          <section id="catalog-legendary" hidden>
+            <h3>Legendary Items</h3>
+            <div id="legendary-list" class="catalog-list"></div>
+          </section>
+        </section>
+      </div>
+    </div>
+
+    <script type="module" src="/src/admin.js"></script>
+  </body>
+  </html>

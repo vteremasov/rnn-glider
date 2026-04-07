@@ -1,248 +1,348 @@
 import { World } from "./ecs/world.js";
-import { ENEMY, GAME_HEIGHT, GAME_WIDTH } from "./game/constants.js";
-import { createShip } from "./game/spawners.js";
+import { createNetworkState } from "./game/network.js";
+import { UPGRADE_LIBRARY } from "./game/upgrades.js";
+import { LEGENDARY_PERKS } from "./game/catalog.js";
 import {
-  chooseCard,
-  createWeaponNetwork,
-  moveCardSelection,
-  moveColumnSelection,
-  moveRowSelection,
-} from "./game/weapon-network.js";
-import {
-  backgroundParallaxSystem,
-  bossAttackSystem,
-  cleanupSystem,
-  collisionSystem,
-  createAutoFireSystem,
-  createEnemySpawnSystem,
-  createRenderSystem,
-  createShipFlightSystem,
-  enemyStatusSystem,
-  enemyHomingSystem,
-  movementSystem,
-  stateSystem,
+  applyDebugScenario,
+  coinSystem,
+  combatStateSystem,
+  enemyMovementSystem,
+  enemySpawnSystem,
+  flashSystem,
+  inputSystem,
+  projectileSystem,
+  renderSystem,
+  resetRun,
+  resizeSystem,
+  towerFireSystem,
 } from "./game/systems.js";
 
 const canvas = document.getElementById("game");
 const ctx = canvas.getContext("2d");
+ctx.imageSmoothingEnabled = true;
+const debugPanel = document.getElementById("debug-panel");
+const debugText = document.getElementById("debug-text");
+const debugCopy = document.getElementById("debug-copy");
+const debugClose = document.getElementById("debug-close");
+const debugBoot = window.__DEBUG_BOOT__ || null;
+const debugRequested = window.location.hash.indexOf("debug") !== -1;
+const devRequested =
+  window.location.hash.indexOf("dev") !== -1 ||
+  new URLSearchParams(window.location.search).get("dev") === "1";
+const devToggle = document.getElementById("devtools-toggle");
+const devPanel = document.getElementById("devtools-panel");
+const devBranch = document.getElementById("dev-branch");
+const devDepth = document.getElementById("dev-depth");
+const devEnterMode = document.getElementById("dev-enter-mode");
+const devPreBossRoom = document.getElementById("dev-preboss-room");
+const devResetBuild = document.getElementById("dev-reset-build");
+const devApply = document.getElementById("dev-apply");
+const devUpgrades = document.getElementById("dev-upgrades");
+const devLegendary = document.getElementById("dev-legendary");
 
-canvas.width = GAME_WIDTH;
-canvas.height = GAME_HEIGHT;
+function stringifyError(value) {
+  if (value === null) {
+    return "[null]";
+  }
+  if (typeof value === "undefined") {
+    return "[undefined]";
+  }
+  if (value instanceof Error) {
+    return value.stack || `${value.name}: ${value.message}`;
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function pushDebugLine(title, detail) {
+  if (!debugRequested && title !== "frame.crash") {
+    return;
+  }
+  const timestamp = new Date().toISOString();
+  const block = `[${timestamp}] ${title}\n${detail}`.trim();
+  debugPanel.classList.add("is-visible");
+  debugText.value = debugText.value ? `${debugText.value}\n\n${block}` : block;
+  debugText.scrollTop = debugText.scrollHeight;
+}
+
+if (debugBoot && typeof debugBoot.setStatus === "function") {
+  debugBoot.setStatus("Main module parsed.");
+}
+
+debugCopy.addEventListener("click", async () => {
+  debugText.removeAttribute("readonly");
+  debugText.focus();
+  debugText.select();
+  debugText.setSelectionRange(0, debugText.value.length);
+
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(debugText.value);
+    } else {
+      document.execCommand("copy");
+    }
+    pushDebugLine("debug.copy", "Copied debug output to clipboard.");
+  } catch (error) {
+    try {
+      document.execCommand("copy");
+      pushDebugLine("debug.copy", "Copied debug output via fallback.");
+    } catch {
+      pushDebugLine("debug.copy.failed", stringifyError(error));
+    }
+  }
+
+  debugText.setAttribute("readonly", "readonly");
+});
+
+debugClose.addEventListener("click", () => {
+  debugPanel.classList.remove("is-visible");
+});
+
+window.addEventListener("error", (event) => {
+  if (event.message === "Script error." && !event.filename) {
+    return;
+  }
+  const location = event.filename ? `\n${event.filename}:${event.lineno}:${event.colno}` : "";
+  pushDebugLine("window.error", `${event.message}${location}\n${stringifyError(event.error)}`);
+});
+
+window.addEventListener("unhandledrejection", (event) => {
+  pushDebugLine("unhandledrejection", stringifyError(event.reason));
+});
 
 const world = new World();
-const themeTileset = new Image();
-themeTileset.src = "./assets/pixel-cyberpunk-interior/pixel_cyberpunk_interior_free_1.0.1/pixel-cyberpunk-interior.png";
-world.resources = {
-  gameOver: false,
-  bossSpawned: false,
-  bossDefeated: false,
-  minibossesDefeated: 0,
-  activeMinibossTier: 0,
-  pendingSpecialUpgrade: false,
-  score: 0,
-  restartRequested: false,
-  commitUpgrade: false,
-  dispatchRow: 0,
-  signalTime: 0,
-  enemySpawnTimer: 0,
-  enemySpawnInterval: ENEMY.spawnInterval,
-  weaponNetwork: createWeaponNetwork(),
-  pointer: {
-    x: 0,
-    y: 0,
-    active: false,
-  },
-  input: {
-    w: false,
-    a: false,
-    s: false,
-    d: false,
-  },
-  stars: Array.from({ length: 130 }, () => ({
-    x: Math.random() * GAME_WIDTH,
-    y: Math.random() * GAME_HEIGHT,
-    size: Math.random() * 2 + 0.4,
-    alpha: Math.random() * 0.55 + 0.2,
-    speed: 40 + Math.random() * 120,
-  })),
-  theme: {
-    tileset: themeTileset,
-    ready: false,
-  },
+world.resources.canvas = canvas;
+world.resources.ctx = ctx;
+const deviceDpr = typeof window !== "undefined" && window.devicePixelRatio ? window.devicePixelRatio : 1;
+world.resources.dpr = Math.min(deviceDpr, 2);
+world.resources.lowPowerMode = deviceDpr > 1.8 && Math.min(window.innerWidth, window.innerHeight) < 820;
+world.resources.network = createNetworkState();
+world.resources.pointer = {
+  x: 0,
+  y: 0,
+  down: false,
+  justReleased: false,
+  downAt: 0,
+  pointerType: "mouse",
 };
+world.resources.phase = { name: "combat" };
+world.resources.rng = Math.random;
+world.resources.resetRequested = false;
+world.resources.layout = {
+  width: 0,
+  height: 0,
+  cell: 0,
+  turretX: 0,
+  turretY: 0,
+  towerY: 0,
+  baseLineY: 0,
+  fieldTop: 0,
+  fieldW: 0,
+  fieldX: 0,
+};
+world.resources.frameIndex = 0;
 
-themeTileset.addEventListener("load", () => {
-  world.resources.theme.ready = true;
-});
-
-createShip(world);
-
-function resolveMovementInput(event) {
-  if (event.code === "KeyW" || event.code === "ArrowUp") {
-    return "w";
-  }
-  if (event.code === "KeyA" || event.code === "ArrowLeft") {
-    return "a";
-  }
-  if (event.code === "KeyS" || event.code === "ArrowDown") {
-    return "s";
-  }
-  if (event.code === "KeyD" || event.code === "ArrowRight") {
-    return "d";
-  }
-
-  const key = event.key.toLowerCase();
-  if (Object.prototype.hasOwnProperty.call(world.resources.input, key)) {
-    return key;
-  }
-  return null;
+if (debugRequested) {
+  debugPanel.classList.add("is-visible");
 }
 
-function clearDirectionalInput() {
-  world.resources.input.w = false;
-  world.resources.input.a = false;
-  world.resources.input.s = false;
-  world.resources.input.d = false;
+function defaultDevState() {
+  const upgrades = {};
+  for (const upgrade of UPGRADE_LIBRARY) {
+    upgrades[upgrade.id] = 0;
+  }
+  return {
+    branchTheme: "spider",
+    depth: 0,
+    enterMode: "map",
+    preBossRoom: "shop",
+    upgrades,
+    legendary: [],
+  };
 }
 
-function setDirectionalInput(inputKey, pressed) {
-  if (!inputKey) {
+const devState = defaultDevState();
+
+function populateDevPanel() {
+  if (!devRequested || !devToggle || !devPanel || !devDepth || !devUpgrades || !devLegendary) {
     return;
   }
+  devToggle.classList.add("is-visible");
+  devBranch.value = devState.branchTheme;
+  devEnterMode.value = devState.enterMode;
+  devPreBossRoom.value = devState.preBossRoom;
 
-  if (pressed) {
-    if (inputKey === "a" || inputKey === "d") {
-      world.resources.input.a = false;
-      world.resources.input.d = false;
+  devDepth.innerHTML = "";
+  for (let depth = 0; depth <= 13; depth += 1) {
+    const option = document.createElement("option");
+    option.value = String(depth);
+    option.textContent = depth === 0 ? "0 Base" : `${depth}`;
+    if (depth === devState.depth) {
+      option.selected = true;
     }
-    if (inputKey === "w" || inputKey === "s") {
-      world.resources.input.w = false;
-      world.resources.input.s = false;
-    }
+    devDepth.appendChild(option);
   }
 
-  world.resources.input[inputKey] = pressed;
-}
-
-function handleUpgradeInput(event) {
-  const upgrade = world.resources.weaponNetwork.upgrade;
-  const key = event.key.toLowerCase();
-
-  if (upgrade.step === "card") {
-    if (event.code === "ArrowUp" || event.code === "KeyW") {
-      moveCardSelection(world.resources.weaponNetwork, -1);
-      return true;
-    }
-    if (event.code === "ArrowDown" || event.code === "KeyS") {
-      moveCardSelection(world.resources.weaponNetwork, 1);
-      return true;
-    }
-    if (key === "1" || key === "2" || key === "3") {
-      return chooseCard(world.resources.weaponNetwork, Number(key) - 1);
-    }
-    if (event.code === "Enter" || event.code === "Space") {
-      return chooseCard(world.resources.weaponNetwork);
-    }
+  devUpgrades.innerHTML = "";
+  for (const upgrade of UPGRADE_LIBRARY) {
+    const row = document.createElement("label");
+    row.className = "devtools-item";
+    row.innerHTML = `
+      <span>${upgrade.name}</span>
+      <input type="number" min="0" max="12" step="1" value="${devState.upgrades[upgrade.id] || 0}" data-upgrade-id="${upgrade.id}" />
+    `;
+    const input = row.querySelector("input");
+    input.addEventListener("input", () => {
+      devState.upgrades[upgrade.id] = Math.max(0, Math.min(12, Number(input.value) || 0));
+      input.value = String(devState.upgrades[upgrade.id]);
+    });
+    devUpgrades.appendChild(row);
   }
 
-  if (upgrade.step === "slot") {
-    if (event.code === "ArrowUp" || event.code === "KeyW") {
-      moveColumnSelection(world.resources.weaponNetwork, -1);
-      return true;
-    }
-    if (event.code === "ArrowDown" || event.code === "KeyS") {
-      moveColumnSelection(world.resources.weaponNetwork, 1);
-      return true;
-    }
-
-    if (event.code === "ArrowLeft" || event.code === "KeyA") {
-      moveRowSelection(world.resources.weaponNetwork, -1);
-      return true;
-    }
-    if (event.code === "ArrowRight" || event.code === "KeyD") {
-      moveRowSelection(world.resources.weaponNetwork, 1);
-      return true;
-    }
-    if (event.code === "Enter" || event.code === "Space") {
-      world.resources.commitUpgrade = true;
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function onKeyDown(event) {
-  if (event.code === "KeyR" || event.key.toLowerCase() === "r") {
-    world.resources.restartRequested = true;
-  }
-
-  if (world.resources.weaponNetwork.upgrade.active) {
-    if (handleUpgradeInput(event)) {
-      event.preventDefault();
-    }
-    return;
-  }
-
-  const inputKey = resolveMovementInput(event);
-  if (inputKey) {
-    event.preventDefault();
-    setDirectionalInput(inputKey, true);
+  devLegendary.innerHTML = "";
+  for (const perk of LEGENDARY_PERKS) {
+    const row = document.createElement("label");
+    row.innerHTML = `
+      <input type="checkbox" value="${perk.id}" ${devState.legendary.indexOf(perk.id) !== -1 ? "checked" : ""} />
+      <span>${perk.name}</span>
+    `;
+    const input = row.querySelector("input");
+    input.addEventListener("change", () => {
+      if (input.checked) {
+        if (devState.legendary.indexOf(perk.id) === -1) {
+          devState.legendary.push(perk.id);
+        }
+      } else {
+        devState.legendary = devState.legendary.filter((id) => id !== perk.id);
+      }
+    });
+    devLegendary.appendChild(row);
   }
 }
 
-function onKeyUp(event) {
-  if (world.resources.weaponNetwork.upgrade.active) {
-    return;
-  }
-
-  const inputKey = resolveMovementInput(event);
-  if (inputKey) {
-    event.preventDefault();
-    setDirectionalInput(inputKey, false);
-  }
+function collectDevScenario() {
+  return {
+    branchTheme: devBranch ? devBranch.value : devState.branchTheme,
+    depth: devDepth ? Number(devDepth.value) || 0 : devState.depth,
+    enterMode: devEnterMode ? devEnterMode.value : devState.enterMode,
+    preBossRoom: devPreBossRoom ? devPreBossRoom.value : devState.preBossRoom,
+    upgrades: { ...devState.upgrades },
+    legendary: devState.legendary.slice(),
+  };
 }
 
-window.addEventListener("keydown", onKeyDown);
-window.addEventListener("keyup", onKeyUp);
-canvas.addEventListener("mousemove", (event) => {
+if (devRequested && devToggle && devPanel) {
+  populateDevPanel();
+  devToggle.addEventListener("click", () => {
+    devPanel.classList.toggle("is-visible");
+  });
+  devBranch.addEventListener("change", () => {
+    devState.branchTheme = devBranch.value;
+  });
+  devDepth.addEventListener("change", () => {
+    devState.depth = Number(devDepth.value) || 0;
+  });
+  devEnterMode.addEventListener("change", () => {
+    devState.enterMode = devEnterMode.value;
+  });
+  devPreBossRoom.addEventListener("change", () => {
+    devState.preBossRoom = devPreBossRoom.value;
+  });
+  devResetBuild.addEventListener("click", () => {
+    const fresh = defaultDevState();
+    devState.branchTheme = fresh.branchTheme;
+    devState.depth = fresh.depth;
+    devState.enterMode = fresh.enterMode;
+    devState.preBossRoom = fresh.preBossRoom;
+    devState.legendary = fresh.legendary.slice();
+    devState.upgrades = { ...fresh.upgrades };
+    populateDevPanel();
+  });
+  devApply.addEventListener("click", () => {
+    applyDebugScenario(world, collectDevScenario());
+    devPanel.classList.remove("is-visible");
+  });
+}
+
+function updatePointer(event) {
   const rect = canvas.getBoundingClientRect();
-  world.resources.pointer.x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-  world.resources.pointer.y = ((event.clientY - rect.top) / rect.height) * canvas.height;
-  world.resources.pointer.active = true;
-});
-canvas.addEventListener("mouseleave", () => {
-  world.resources.pointer.active = false;
+  world.resources.pointer.x = event.clientX - rect.left;
+  world.resources.pointer.y = event.clientY - rect.top;
+  world.resources.pointer.pointerType = event.pointerType || "mouse";
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  updatePointer(event);
+  world.resources.pointer.down = true;
+  world.resources.pointer.downAt = performance.now();
 });
 
-window.addEventListener("blur", () => {
-  clearDirectionalInput();
-  world.resources.pointer.active = false;
+canvas.addEventListener("pointermove", (event) => {
+  updatePointer(event);
 });
+
+canvas.addEventListener("pointerup", (event) => {
+  updatePointer(event);
+  world.resources.pointer.down = false;
+  world.resources.pointer.justReleased = true;
+  world.resources.pointer.downAt = 0;
+});
+
+canvas.addEventListener("pointercancel", () => {
+  world.resources.pointer.down = false;
+  world.resources.pointer.downAt = 0;
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key.toLowerCase() === "r") {
+    world.resources.resetRequested = true;
+  }
+});
+
+resetRun(world);
+if (debugBoot && typeof debugBoot.setStatus === "function") {
+  debugBoot.setStatus("Game loop initialized.");
+}
 
 const systems = [
-  stateSystem,
-  backgroundParallaxSystem,
-  createShipFlightSystem(),
-  createAutoFireSystem(),
-  createEnemySpawnSystem(),
-  enemyHomingSystem,
-  bossAttackSystem,
-  movementSystem,
-  enemyStatusSystem,
-  collisionSystem,
-  cleanupSystem,
-  createRenderSystem(ctx, canvas),
+  resizeSystem,
+  inputSystem,
+  combatStateSystem,
+  enemySpawnSystem,
+  towerFireSystem,
+  enemyMovementSystem,
+  projectileSystem,
+  coinSystem,
+  flashSystem,
+  renderSystem,
 ];
 
-let previous = performance.now();
+let lastTime = performance.now();
 
 function frame(now) {
-  const dt = Math.min((now - previous) / 1000, 1 / 30);
-  previous = now;
+  try {
+    const delta = Math.min((now - lastTime) / 1000, 0.033);
+    lastTime = now;
+    world.resources.frameIndex += 1;
 
-  for (const system of systems) {
-    system(world, dt);
+    if (world.resources.resetRequested) {
+      world.resources.network = createNetworkState();
+      world.resources.resetRequested = false;
+      resetRun(world);
+    }
+
+    for (const system of systems) {
+      system(world, delta);
+    }
+  } catch (error) {
+    pushDebugLine("frame.crash", stringifyError(error));
+    return;
   }
 
   requestAnimationFrame(frame);

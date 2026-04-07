@@ -2,36 +2,472 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>rnn-glider reactor prototype</title>
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no"
+    />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    />
+    <title>Neural Bastion</title>
+    <script>
+      (function () {
+        if (!window.ethereum) {
+          window.ethereum = {
+            selectedAddress: undefined,
+          };
+        }
+      })();
+    </script>
     <style>
       :root {
         color-scheme: dark;
+        --bg-0: #14171d;
+        --bg-1: #232a33;
+        --steel: #2c333b;
+        --line: #79879a;
+        --energy: #cfd7e6;
+        --energy-soft: rgba(207, 215, 230, 0.22);
+        --threat: #c86a56;
+        --threat-soft: rgba(212, 107, 79, 0.18);
+        --ink: #eef1f6;
+      }
+
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at top, rgba(207, 215, 230, 0.08), transparent 34%),
+          linear-gradient(180deg, var(--bg-1), var(--bg-0) 58%, #101318);
+        font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
       }
 
       body {
-        margin: 0;
-        min-height: 100vh;
         display: grid;
-        place-items: center;
-        overflow: hidden;
-        background: radial-gradient(circle at top, #1f2a44 0%, #0a0f1d 55%, #04060d 100%);
-        font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+        place-items: stretch;
       }
 
       canvas {
-        border: 1px solid #2f3a57;
-        box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
-        background: #050915;
-        width: min(100vw, calc(100vh * 16 / 9));
-        height: min(100vh, calc(100vw * 9 / 16));
-        max-width: 100vw;
-        max-height: 100vh;
+        width: 100vw;
+        height: 100vh;
+        display: block;
+        touch-action: none;
+      }
+
+      .debug-panel {
+        position: fixed;
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        z-index: 20;
+        display: none;
+        padding: 10px;
+        border: 1px solid #ff7c53;
+        border-radius: 12px;
+        background: rgba(20, 8, 8, 0.94);
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+      }
+
+      .debug-panel.is-visible {
+        display: block;
+      }
+
+      .debug-panel__head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+        color: #ffd7cc;
+        font-size: 14px;
+      }
+
+      .debug-panel__actions {
+        display: flex;
+        gap: 8px;
+      }
+
+      .debug-panel button {
+        border: 1px solid #b85b42;
+        border-radius: 8px;
+        background: #2d1612;
+        color: #fff3ef;
+        padding: 8px 10px;
+        font: inherit;
+      }
+
+      .debug-panel textarea {
+        width: 100%;
+        min-height: 180px;
+        resize: vertical;
+        border: 1px solid #6c3124;
+        border-radius: 8px;
+        background: #120909;
+        color: #ffe3dc;
+        padding: 10px;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .debug-panel__status {
+        margin-bottom: 8px;
+        color: #ffd7cc;
+        font-size: 12px;
+      }
+
+      .devtools-toggle {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        z-index: 18;
+        display: none;
+        border: 1px solid rgba(143, 216, 255, 0.3);
+        border-radius: 10px;
+        background: rgba(18, 23, 30, 0.9);
+        color: #eef1f6;
+        padding: 9px 12px;
+        font: 12px/1 "Avenir Next", "Segoe UI", sans-serif;
+      }
+
+      .devtools-toggle.is-visible {
+        display: block;
+      }
+
+      .devtools-panel {
+        position: fixed;
+        top: 52px;
+        left: 10px;
+        z-index: 19;
+        width: min(360px, calc(100vw - 20px));
+        max-height: calc(100vh - 72px);
+        overflow: auto;
+        display: none;
+        padding: 12px;
+        border: 1px solid rgba(143, 216, 255, 0.22);
+        border-radius: 14px;
+        background: rgba(17, 22, 28, 0.94);
+        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.36);
+        color: #eef1f6;
+      }
+
+      .devtools-panel.is-visible {
+        display: block;
+      }
+
+      .devtools-panel h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .devtools-grid {
+        display: grid;
+        gap: 8px;
+      }
+
+      .devtools-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .devtools-panel label {
+        display: grid;
+        gap: 4px;
+        font-size: 12px;
+        color: #b1bbc9;
+      }
+
+      .devtools-panel input,
+      .devtools-panel select,
+      .devtools-panel button {
+        width: 100%;
+        border: 1px solid rgba(246, 248, 251, 0.14);
+        border-radius: 10px;
+        background: rgba(9, 13, 18, 0.88);
+        color: #eef1f6;
+        padding: 8px 10px;
+        font: inherit;
+      }
+
+      .devtools-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      .devtools-list {
+        display: grid;
+        gap: 6px;
+        padding-top: 4px;
+      }
+
+      .devtools-item {
+        display: grid;
+        grid-template-columns: 1fr 72px;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .devtools-item span {
+        font-size: 12px;
+        color: #d7dce4;
+      }
+
+      .devtools-checks {
+        display: grid;
+        gap: 6px;
+      }
+
+      .devtools-checks label {
+        grid-template-columns: auto 1fr;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .devtools-checks input[type="checkbox"] {
+        width: auto;
       }
     </style>
   </head>
   <body>
-    <canvas id="game" width="1920" height="1080"></canvas>
-    <script type="module" src="./src/main.js"></script>
+    <canvas id="game" aria-label="Neural Bastion game"></canvas>
+    <button id="devtools-toggle" class="devtools-toggle" type="button">Dev</button>
+    <section id="devtools-panel" class="devtools-panel" aria-live="polite">
+      <h3>Debug Run</h3>
+      <div class="devtools-grid">
+        <div class="devtools-row">
+          <label>
+            Branch
+            <select id="dev-branch">
+              <option value="worm">Worm</option>
+              <option value="beetle">Beetle</option>
+              <option value="spider" selected>Spider</option>
+            </select>
+          </label>
+          <label>
+            Depth
+            <select id="dev-depth"></select>
+          </label>
+        </div>
+        <div class="devtools-row">
+          <label>
+            Mode
+            <select id="dev-enter-mode">
+              <option value="map" selected>Jump To Map</option>
+              <option value="enter">Jump And Enter</option>
+            </select>
+          </label>
+          <label>
+            Pre-Boss
+            <select id="dev-preboss-room">
+              <option value="shop" selected>Shop</option>
+              <option value="camp">Camp</option>
+            </select>
+          </label>
+        </div>
+        <div class="devtools-actions">
+          <button id="dev-reset-build" type="button">Reset Build</button>
+          <button id="dev-apply" type="button">Apply Scenario</button>
+        </div>
+        <label>
+          Upgrades
+          <div id="dev-upgrades" class="devtools-list"></div>
+        </label>
+        <label>
+          Legendary
+          <div id="dev-legendary" class="devtools-checks"></div>
+        </label>
+      </div>
+    </section>
+    <section id="debug-panel" class="debug-panel" aria-live="polite">
+      <div class="debug-panel__head">
+        <strong>Debug Output</strong>
+        <div class="debug-panel__actions">
+          <button id="debug-copy" type="button">Copy</button>
+          <button id="debug-close" type="button">Hide</button>
+        </div>
+      </div>
+      <div id="debug-status" class="debug-panel__status">Booting runtime...</div>
+      <textarea id="debug-text" spellcheck="false" readonly></textarea>
+    </section>
+    <script>
+      (function () {
+        var panel = document.getElementById("debug-panel");
+        var text = document.getElementById("debug-text");
+        var status = document.getElementById("debug-status");
+        var copy = document.getElementById("debug-copy");
+        var close = document.getElementById("debug-close");
+        var debugRequested = location.hash.indexOf("debug") !== -1;
+
+        function normalizeDetail(detail) {
+          if (detail === null) {
+            return "[null]";
+          }
+          if (typeof detail === "undefined") {
+            return "[undefined]";
+          }
+          if (detail === "") {
+            return "[empty string]";
+          }
+          return String(detail);
+        }
+
+        function push(title, detail) {
+          var stamp = new Date().toISOString();
+          var block = "[" + stamp + "] " + title + "\n" + normalizeDetail(detail);
+          text.value = text.value ? text.value + "\n\n" + block : block;
+          text.scrollTop = text.scrollHeight;
+          panel.className = "debug-panel is-visible";
+        }
+
+        function shouldIgnoreError(message, source) {
+          var text = normalizeDetail(message);
+          var path = normalizeDetail(source);
+          if (text === "Script error." && (path === "[empty string]" || path === "[undefined]")) {
+            return true;
+          }
+          if (text.indexOf("window.ethereum.selectedAddress") !== -1) {
+            return true;
+          }
+          if (text.indexOf("ethereum.selectedAddress") !== -1) {
+            return true;
+          }
+          if (path.indexOf(location.origin + "/") === 0 && text.indexOf("undefined is not an object") !== -1) {
+            return text.indexOf("ethereum") !== -1;
+          }
+          return false;
+        }
+
+        function collectDebugOutput() {
+          var parts = [];
+          if (status && status.textContent) {
+            parts.push("STATUS\n" + status.textContent);
+          }
+          if (text && text.value) {
+            parts.push("LOG\n" + text.value);
+          }
+          if (parts.length === 0) {
+            parts.push("STATUS\n[no debug text]");
+          }
+          return parts.join("\n\n");
+        }
+
+        window.__DEBUG_BOOT__ = {
+          setStatus: function (message) {
+            status.textContent = message;
+          },
+          push: push,
+        };
+
+        function featureSummary() {
+          var canvas = document.getElementById("game");
+          var probe = canvas && canvas.getContext ? canvas.getContext("2d") : null;
+          return [
+            "ua=" + navigator.userAgent,
+            "promise=" + !!window.Promise,
+            "map=" + !!window.Map,
+            "set=" + !!window.Set,
+            "moduleScript=" + ("noModule" in document.createElement("script")),
+            "canvas2d=" + !!probe,
+            "pointer=" + ("PointerEvent" in window),
+            "touch=" + ("ontouchstart" in window),
+          ].join("\n");
+        }
+
+        copy.onclick = function () {
+          var payload = collectDebugOutput();
+          var originalValue = text.value;
+          text.removeAttribute("readonly");
+          text.value = payload;
+          text.focus();
+          text.select();
+          try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(payload);
+            } else {
+              document.execCommand("copy");
+            }
+            push("debug.copy", "Copied debug output.");
+          } catch (error) {
+            push("debug.copy.failed", normalizeDetail(error && error.message ? error.message : error));
+          }
+          text.value = originalValue;
+          text.setAttribute("readonly", "readonly");
+        };
+
+        close.onclick = function () {
+          panel.className = "debug-panel";
+        };
+
+        window.onerror = function (message, source, lineno, colno, error) {
+          if (shouldIgnoreError(message, source)) {
+            if (debugRequested) {
+              status.textContent = "Ignored external script error.";
+            }
+            return true;
+          }
+          push(
+            "window.onerror",
+            String(message) +
+              "\n" +
+              String(source || "") +
+              ":" +
+              String(lineno || 0) +
+              ":" +
+              String(colno || 0) +
+              "\n" +
+              (error && error.stack ? error.stack : "")
+          );
+        };
+
+        window.onunhandledrejection = function (event) {
+          var reason = event && event.reason;
+          if (shouldIgnoreError(reason && reason.message ? reason.message : reason, "")) {
+            status.textContent = "Ignored external wallet script rejection.";
+            return true;
+          }
+          push("window.onunhandledrejection", reason && reason.stack ? reason.stack : normalizeDetail(reason));
+        };
+
+        if (debugRequested) {
+          push("boot.features", featureSummary());
+        }
+
+        if (!window.Promise || !window.Map || !window.Set) {
+          status.textContent = "Browser too old for this build.";
+          push("boot.incompatible", "Missing Promise/Map/Set support.");
+          return;
+        }
+
+        if (!("noModule" in document.createElement("script"))) {
+          status.textContent = "Module scripts unsupported.";
+          push("boot.incompatible", "Browser does not support module scripts.");
+          return;
+        }
+
+        status.textContent = "Injecting module script...";
+        var moduleScript = document.createElement("script");
+        moduleScript.type = "module";
+        moduleScript.src = "./src/main.js";
+        moduleScript.onload = function () {
+          status.textContent = "Module loaded.";
+          if (debugRequested) {
+            push("boot.module.loaded", "src/main.js loaded");
+          }
+        };
+        moduleScript.onerror = function (event) {
+          status.textContent = "Module load failed.";
+          push("boot.module.error", normalizeDetail(event && event.message ? event.message : "script load error"));
+        };
+        document.body.appendChild(moduleScript);
+      })();
+    </script>
   </body>
 </html>

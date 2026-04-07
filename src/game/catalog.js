@@ -1,0 +1,67 @@
+export const LEGENDARY_PERKS = [
+  {
+    id: "opening_barrage",
+    name: "Opening Barrage",
+    short: "Start battle with all 5 inputs charged.",
+    description: "At battle start, all five entry neurons fire immediately. Links and topology amplify the opening burst as normal.",
+    stats: [
+      "Battle start: all 5 inputs charged",
+      "Immediate opening burst across all lanes",
+    ],
+    color: "#f4d58a",
+    icon: "A",
+    shape: "hex",
+  },
+  {
+    id: "thermal_feedback",
+    name: "Thermal Feedback",
+    short: "Freeze adds +20% fire damage this battle.",
+    description: "Each time your shots apply freeze during a battle, all burn damage gains +20% for the rest of that battle.",
+    stats: [
+      "Every freeze proc: +20% burn damage",
+      "Bonus lasts until battle end",
+    ],
+    color: "#ff9a68",
+    icon: "F",
+    shape: "diamond",
+  },
+  {
+    id: "void_resonance",
+    name: "Void Resonance",
+    short: "Slow adds +20% void damage this battle.",
+    description: "Each time your shots apply slow during a battle, all void curse damage gains +20% for the rest of that battle.",
+    stats: [
+      "Every slow proc: +20% void damage",
+      "Bonus lasts until battle end",
+    ],
+    color: "#be9aff",
+    icon: "V",
+    shape: "diamond",
+  },
+  {
+    id: "resonant_mesh",
+    name: "Resonant Mesh",
+    short: "Matching adjacent upgrades auto-link.",
+    description: "Adjacent neurons with the same upgrade type create sideways links between each other during battle.",
+    stats: [
+      "Adjacent matching upgrades auto-link",
+      "Sideways links form during battle only",
+    ],
+    color: "#8ff0d2",
+    icon: "M",
+    shape: "hex",
+  },
+  {
+    id: "rapid_chamber",
+    name: "Rapid Chamber",
+    short: "+100% fire rate.",
+    description: "The turret cycles 100% faster in every battle.",
+    stats: [
+      "Global route speed: +100%",
+      "Charges reach turret much faster",
+    ],
+    color: "#8dd9ff",
+    icon: "R",
+    shape: "square",
+  },
+];

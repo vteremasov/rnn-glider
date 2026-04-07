@@ -1,26 +1,37 @@
-# rnn-glider
+# Neural Bastion
 
-`rnn-glider` is a dependency-free 2D canvas prototype built with plain JavaScript, ES modules, and a lightweight ECS.
-The current theme is a reactor-defense lab where a signal lattice powers one central discharge turret.
+Mobile-first sci-fi lane defense prototype built with plain JavaScript, ES modules, Canvas 2D, and a lightweight ECS.
 
-## Run locally
+## Run
 
-Serve the repository root with a local web server:
+Serve the repository root with the bundled static-only dev server:
 
 ```bash
-python3 -m http.server 8080
+python3 scripts/dev_static_server.py --port 6969
 ```
 
-Then open `http://localhost:8080`.
+Or use the safe launcher, which starts it only if nothing is already serving on that port:
 
-## Current game loop
+```bash
+bash scripts/ensure_dev_server.sh 6969
+```
 
-- Move the defense core with `W/A/S/D`
-- Auto-fire from one central turret using routed signal bursts
-- Upgrade the relay lattice through normal and miniboss reward cards
-- Survive enemy waves, sub-cores, and the final rogue core
+Open `http://localhost:6969`.
 
-## Deploy
+Admin tools: `http://localhost:6969/admin.html`
 
-The repository is configured for GitHub Pages through `.github/workflows/pages.yml`.
-Push to `main` to deploy the static site.
+## Current Vertical Slice
+
+- One central turret across a portrait-first battlefield
+- Enemies descend from the top toward the base shield and core
+- A visible neural network charges over time and powers the turret
+- Route-map progression with branch themes, elite rooms, shop, camp, and bosses
+- Upgrade mix covering projectile effects, topology, summons, and legendary perks
+
+## Gameplay Documentation Rule
+
+Detailed gameplay logic and architecture are documented in [docs/GAME_LOGIC_HD.md](/home/dev/rnn-glider/docs/GAME_LOGIC_HD.md).
+
+When gameplay logic changes, that file must be updated in the same change set.
+
+When a temporary screenshot is dropped into the repository to diagnose a bug, it must be deleted in the same fix change set after the bug is addressed.

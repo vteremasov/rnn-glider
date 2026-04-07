@@ -7,9 +7,9 @@ export class World {
   }
 
   createEntity() {
-    const id = this.nextEntityId++;
-    this.entities.add(id);
-    return id;
+    const entity = this.nextEntityId++;
+    this.entities.add(entity);
+    return entity;
   }
 
   destroyEntity(entity) {
@@ -23,36 +23,29 @@ export class World {
     }
   }
 
-  addComponent(entity, name, data) {
+  addComponent(entity, name, value) {
     if (!this.entities.has(entity)) {
-      throw new Error(`Entity ${entity} does not exist`);
+      throw new Error(`Unknown entity ${entity}`);
     }
 
     if (!this.components.has(name)) {
       this.components.set(name, new Map());
     }
 
-    this.components.get(name).set(entity, data);
+    this.components.get(name).set(entity, value);
   }
 
   getComponent(entity, name) {
-    return this.components.get(name)?.get(entity);
+    const store = this.components.get(name);
+    return store ? store.get(entity) : undefined;
   }
 
-  hasComponent(entity, name) {
-    return this.components.get(name)?.has(entity) ?? false;
-  }
-
-  removeComponent(entity, name) {
-    this.components.get(name)?.delete(entity);
-  }
-
-  query(...componentNames) {
-    if (componentNames.length === 0) {
+  query(...names) {
+    if (names.length === 0) {
       return [];
     }
 
-    const primary = this.components.get(componentNames[0]);
+    const primary = this.components.get(names[0]);
     if (!primary) {
       return [];
     }
@@ -60,8 +53,9 @@ export class World {
     const matches = [];
     for (const entity of primary.keys()) {
       let valid = true;
-      for (let i = 1; i < componentNames.length; i += 1) {
-        if (!this.components.get(componentNames[i])?.has(entity)) {
+      for (let index = 1; index < names.length; index += 1) {
+        const store = this.components.get(names[index]);
+        if (!store || !store.has(entity)) {
           valid = false;
           break;
         }
@@ -70,7 +64,6 @@ export class World {
         matches.push(entity);
       }
     }
-
     return matches;
   }
 }
