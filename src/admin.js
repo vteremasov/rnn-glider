@@ -1,5 +1,6 @@
 import { UPGRADE_LIBRARY, MAX_UPGRADE_LEVEL } from "./game/upgrades.js";
 import { LEGENDARY_PERKS } from "./game/catalog.js";
+import { ENEMY_CATALOG } from "./game/enemy_catalog.js";
 
 const LEGACY_ROADMAP_KEY = "neural-bastion-admin-v1";
 const DRAFT_KEY = "neural-bastion-admin-draft-v2";
@@ -17,6 +18,7 @@ const AUTO_DONE_TITLES = new Set([
   "Summon upgrade replaces Accelerator",
   "Improve text readability",
   "Add game debug mode",
+  "Improve signal transfer and turret charge animation",
 ]);
 
 function randomId() {
@@ -73,6 +75,20 @@ const DEFAULT_TASKS = [
   },
   {
     id: randomId(),
+    title: "Improve turret charge visuals and power buildup",
+    notes: "Make it clearer that the turret is storing routed energy and building up power before each fired shot.",
+    area: "ui",
+    status: "idea",
+  },
+  {
+    id: randomId(),
+    title: "Move topology upgrades into connection space",
+    notes: "Link-type upgrades should live between neurons on the connections, while the neuron body itself should stay reserved for neuron upgrades.",
+    area: "ui",
+    status: "idea",
+  },
+  {
+    id: randomId(),
     title: "Add game debug mode",
     notes: "Allow jumping to a chosen tree depth and assembling a desired build immediately for testing runs.",
     area: "other",
@@ -83,6 +99,13 @@ const DEFAULT_TASKS = [
     title: "Add paid upgrade rerolls",
     notes: "Let the player reroll offered upgrades by spending money during reward/shop flows.",
     area: "economy",
+    status: "idea",
+  },
+  {
+    id: randomId(),
+    title: "Deterministic seeded runs",
+    notes: "Use pseudo-random generation with an explicit starting seed so a full run can be reproduced exactly. Debug mode should also allow setting the seed from the URL.",
+    area: "other",
     status: "idea",
   },
   {
@@ -127,7 +150,7 @@ const UPGRADE_STATS = {
   curse: ["Curse DPS per stack: 1.8", "Curse stack cap per enemy: 20"],
   slow: ["Slow per stack: 6%"],
   freeze: ["Freeze per stack: 0.08", "Freeze decay tuned to long stop windows"],
-  pushback: ["Push force per stack: 20"],
+  pushback: ["Push force per stack: 5"],
   penetration: ["Pierce per stack: +1 target"],
   ricochet: ["Bounce per stack: +1 target"],
   shield: ["Shield gain on successful hit: +1"],
@@ -211,6 +234,18 @@ function defaultLegendaryDrafts() {
   }));
 }
 
+function defaultEnemyDrafts() {
+  return ENEMY_CATALOG.map((enemy) => ({
+    id: enemy.id,
+    name: enemy.name,
+    short: enemy.short,
+    description: enemy.description,
+    family: enemy.family,
+    role: enemy.role,
+    stats: sanitizeStringArray(enemy.stats || [], []),
+  }));
+}
+
 function sanitizeUpgradeDraft(entry, fallback) {
   return {
     id: fallback.id,
@@ -236,6 +271,18 @@ function sanitizeLegendaryDraft(entry, fallback) {
     color: String((entry && entry.color) || fallback.color),
     icon: String((entry && entry.icon) || fallback.icon),
     shape: String((entry && entry.shape) || fallback.shape),
+    stats: sanitizeStringArray(entry && entry.stats, fallback.stats),
+  };
+}
+
+function sanitizeEnemyDraft(entry, fallback) {
+  return {
+    id: fallback.id,
+    name: String((entry && entry.name) || fallback.name),
+    short: String((entry && entry.short) || fallback.short),
+    description: String((entry && entry.description) || fallback.description),
+    family: String((entry && entry.family) || fallback.family),
+    role: String((entry && entry.role) || fallback.role),
     stats: sanitizeStringArray(entry && entry.stats, fallback.stats),
   };
 }
@@ -274,6 +321,7 @@ function defaultDraft() {
     roadmap: loadLegacyRoadmap(),
     upgrades: defaultUpgradeDrafts(),
     legendary: defaultLegendaryDrafts(),
+    enemies: defaultEnemyDrafts(),
   };
 }
 
@@ -297,6 +345,7 @@ function loadDraft() {
       roadmap: missingTasks.length ? [...missingTasks, ...existingRoadmap] : existingRoadmap,
       upgrades: mergeById(fallback.upgrades, parsed && parsed.upgrades, sanitizeUpgradeDraft),
       legendary: mergeById(fallback.legendary, parsed && parsed.legendary, sanitizeLegendaryDraft),
+      enemies: mergeById(fallback.enemies, parsed && parsed.enemies, sanitizeEnemyDraft),
     };
   } catch {
     return fallback;
@@ -588,11 +637,30 @@ function renderLegendaryCatalog() {
   }
 }
 
+function renderEnemyCatalog() {
+  const root = document.getElementById("enemy-list");
+  if (!root) {
+    return;
+  }
+  root.innerHTML = "";
+
+  for (const enemy of draft.enemies) {
+    root.appendChild(renderDataCard(
+      enemy,
+      `enemy:${enemy.id}`,
+      `${enemy.role} enemy`,
+      [enemy.family, enemy.role],
+      ["name", "short", "description", "stats"],
+    ));
+  }
+}
+
 function renderTabs() {
   const tabs = document.querySelectorAll("[data-tab]");
   const roadmapRoot = document.getElementById("catalog-roadmap");
   const upgradesRoot = document.getElementById("catalog-upgrades");
   const legendaryRoot = document.getElementById("catalog-legendary");
+  const enemiesRoot = document.getElementById("catalog-enemies");
   tabs.forEach((tab) => {
     const active = tab.dataset.tab === activeCatalogTab;
     tab.classList.toggle("active", active);
@@ -607,6 +675,9 @@ function renderTabs() {
   if (legendaryRoot) {
     legendaryRoot.hidden = activeCatalogTab !== "legendary";
   }
+  if (enemiesRoot) {
+    enemiesRoot.hidden = activeCatalogTab !== "enemies";
+  }
 }
 
 function renderAll() {
@@ -614,6 +685,7 @@ function renderAll() {
   renderRoadmap();
   renderUpgradeCatalog();
   renderLegendaryCatalog();
+  renderEnemyCatalog();
 }
 
 function initTabs() {
@@ -631,6 +703,7 @@ function exportPayload() {
     roadmap: clone(draft.roadmap),
     upgrades: clone(draft.upgrades),
     legendary: clone(draft.legendary),
+    enemies: clone(draft.enemies),
   };
 }
 

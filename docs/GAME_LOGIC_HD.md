@@ -85,6 +85,13 @@ If a temporary screenshot is added to diagnose a bug, that screenshot must be de
 - Route speed is controlled by neural charge transfer, not by a separate turret cooldown.
 - If route fire-rate bonuses exist, they accelerate the network transfer timings themselves.
 - The turret does not switch to the next source lane until the current packet has fully reached the turret and been fired.
+- Turret charge buildup should visibly fill before each queued shot releases, rather than snapping instantly from route arrival to muzzle flash.
+- Turret visuals should show stored pressure in the base, a brighter core, and visible buildup in the barrel before discharge, not just a flat bar fill.
+- Once a packet has already left the lower source layer and is in the turret-shot phase, the first row should not keep pulsing as if a fresh packet started again.
+- During the turret-shot phase, lower network connections should remain visibly active and held, but they should not replay the travel animation again.
+- Those held connections should only fade after the packet finishes firing and the route releases.
+- The top network layer must also stay in a steady held state during turret-shot phase; only the outgoing `output -> turret` channel should keep animating.
+- The `output -> turret` channel should not replay a fresh travel pass for every shot in the same packet; during shot-phase it should stay as a held active route and vary only in intensity.
 
 ### Topology
 
@@ -156,6 +163,10 @@ Validation rules:
 - Shield contact does not instantly kill the enemy.
 - On shield contact, shield loses `1`, the enemy takes `1` damage, is pushed back by about its own size, and is briefly stopped before resuming.
 - This shield contact rule applies to regular enemies, elites, minibosses, and bosses. Base HP is only threatened after shield is gone.
+- Enemy pushback behavior is driven by enemy-side resistance properties, not by projectile-side special cases.
+- Bosses use `pushbackResistance = 0.25`, so bullets push them 75% less than normal enemies.
+- Bosses use `shieldKnockbackDistance = 0.25`, so the base shield only knocks them back by a quarter of their size on contact.
+- Enemies with personal shields should render a visible shield shell around the body, react when shield is hit, and show a stronger shield-break flash when the personal shield collapses.
 - Base HP is only hit after shield is gone.
 
 DoT visibility rules:

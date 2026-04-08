@@ -107,6 +107,27 @@ function enemyScreenX(layout, enemy) {
   return laneCenterX(layout, enemy.lane) + (enemy.xOffset || 0);
 }
 
+function computeTurretChargeProgress(network) {
+  if (!network) {
+    return 0;
+  }
+  const packetShots = network.pendingShot ? network.pendingShot.shots || [] : [];
+  const currentPacketShot =
+    network.pendingShot && network.outputChargeIndex < packetShots.length
+      ? packetShots[network.outputChargeIndex]
+      : null;
+  const packetProgress = packetShots.length > 0
+    ? clamp(
+        (Math.min(network.outputChargeIndex || 0, packetShots.length)
+          + (currentPacketShot ? clamp(network.outputChargeTimer / Math.max(network.outputChargeStep, 0.001), 0, 1) : 0))
+          / packetShots.length,
+        0,
+        1,
+      )
+    : 0;
+  return clamp(Math.max((network.queuedShots || []).length / LANE_COUNT, packetProgress), 0, 1);
+}
+
 function drawSpiderEnemy(ctx, enemy, x, y) {
   const radius = enemy.radius;
   ctx.fillStyle = "rgba(7, 10, 14, 0.28)";
@@ -302,6 +323,71 @@ function drawEnemy(ctx, enemy, x, y) {
     return;
   }
   drawSpiderEnemy(ctx, enemy, x, y);
+}
+
+function drawEnemyShield(ctx, enemy, x, y, phase = "back") {
+  if (!enemy || (enemy.shield || 0) <= 0 || (enemy.maxShield || 0) <= 0) {
+    return;
+  }
+  const strength = clamp(enemy.shield / Math.max(enemy.maxShield, 1), 0, 1);
+  const family = enemy.family || "spider";
+  let shellRx = enemy.radius * (enemy.boss ? 1.56 : enemy.elite ? 1.38 : 1.28);
+  let shellRy = shellRx * (enemy.boss ? 0.94 : 0.88);
+  let centerY = y - enemy.radius * 0.08;
+  if (family === "spider") {
+    shellRx = enemy.radius * (enemy.boss ? 2.56 : enemy.elite ? 2.22 : 2.0);
+    shellRy = enemy.radius * (enemy.boss ? 2.08 : enemy.elite ? 1.84 : 1.64);
+    centerY = y + enemy.radius * 0.06;
+  } else if (family === "worm") {
+    shellRx = enemy.radius * (enemy.boss ? 1.68 : enemy.elite ? 1.52 : 1.38);
+    shellRy = enemy.radius * (enemy.boss ? 2.7 : enemy.elite ? 2.3 : 2.02);
+    centerY = y - enemy.radius * 0.04;
+  } else if (family === "beetle") {
+    shellRx = enemy.radius * (enemy.boss ? 1.82 : enemy.elite ? 1.62 : 1.42);
+    shellRy = enemy.radius * (enemy.boss ? 1.44 : enemy.elite ? 1.26 : 1.08);
+    centerY = y - enemy.radius * 0.02;
+  }
+  const pulse = 0.5 + Math.sin((enemy.shieldVisualPulse || 0) * 5.6) * 0.5;
+  const hitFlash = enemy.shieldHitFlash || 0;
+  const shellAlpha = 0.18 + strength * 0.18 + pulse * 0.06;
+  const rimAlpha = 0.38 + strength * 0.22 + pulse * 0.14 + hitFlash * 0.24;
+  const shellGradient = ctx.createLinearGradient(x, centerY - shellRy, x, centerY + shellRy);
+  shellGradient.addColorStop(0, `rgba(232, 250, 255, ${0.15 + strength * 0.1 + pulse * 0.06 + hitFlash * 0.1})`);
+  shellGradient.addColorStop(0.28, `rgba(145, 220, 255, ${shellAlpha})`);
+  shellGradient.addColorStop(0.62, `rgba(84, 170, 235, ${0.12 + strength * 0.1 + pulse * 0.05})`);
+  shellGradient.addColorStop(1, `rgba(34, 89, 146, ${0.04 + strength * 0.04})`);
+
+  if (phase === "back") {
+    ctx.fillStyle = shellGradient;
+    ctx.beginPath();
+    ctx.ellipse(x, centerY, shellRx, shellRy, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = `rgba(152, 229, 255, ${0.28 + strength * 0.18 + pulse * 0.09})`;
+    ctx.lineWidth = Math.max(1.4, enemy.radius * 0.06);
+    ctx.beginPath();
+    ctx.ellipse(x, centerY - enemy.radius * 0.08, shellRx * 0.82, shellRy * 0.74, 0, -2.42, -0.58);
+    ctx.stroke();
+    return;
+  }
+
+  ctx.strokeStyle = `rgba(180, 238, 255, ${rimAlpha})`;
+  ctx.lineWidth = Math.max(1.8, enemy.radius * 0.08);
+  ctx.beginPath();
+  ctx.ellipse(x, centerY, shellRx, shellRy, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(240, 251, 255, ${0.16 + strength * 0.16 + pulse * 0.1 + hitFlash * 0.14})`;
+  ctx.lineWidth = Math.max(1.2, enemy.radius * 0.05);
+  ctx.beginPath();
+  ctx.ellipse(x, centerY - enemy.radius * 0.08, shellRx * 0.84, shellRy * 0.72, 0, -2.4, -0.5);
+  ctx.stroke();
+
+  ctx.strokeStyle = `rgba(126, 215, 255, ${0.16 + strength * 0.14 + pulse * 0.08})`;
+  ctx.lineWidth = Math.max(1.1, enemy.radius * 0.05);
+  ctx.beginPath();
+  ctx.ellipse(x, centerY + enemy.radius * 0.05, shellRx * 0.9, shellRy * 0.82, 0, 0.24, 2.7);
+  ctx.stroke();
 }
 
 function projectileVisual(projectile) {
@@ -614,6 +700,8 @@ function bossSpiderKind(wave, branchTheme = "spider", run = null) {
       family: "worm",
       hp,
       shield: hp,
+      pushbackResistance: 0.25,
+      shieldKnockbackDistance: 0.25,
       speed: 6.5 + wave * 0.2,
       reward: 56 + wave * 10,
       damage: 999,
@@ -629,6 +717,8 @@ function bossSpiderKind(wave, branchTheme = "spider", run = null) {
       family: "beetle",
       hp,
       shield: hp,
+      pushbackResistance: 0.25,
+      shieldKnockbackDistance: 0.25,
       speed: 5.4 + wave * 0.18,
       reward: 56 + wave * 10,
       damage: 999,
@@ -643,6 +733,8 @@ function bossSpiderKind(wave, branchTheme = "spider", run = null) {
     family: "spider",
     hp,
     shield: hp,
+    pushbackResistance: 0.25,
+    shieldKnockbackDistance: 0.25,
     speed: 6.2 + wave * 0.22,
     reward: 56 + wave * 10,
     damage: 999,
@@ -1456,13 +1548,8 @@ function commitNodeReorder(world, origin, target) {
   if (targetOccupied && canMergeNodeSnapshots(sourceSnapshot, targetSnapshot)) {
     mergeNodeSnapshots(targetNode, sourceSnapshot, targetSnapshot);
     restoreNodeState(sourceNode, createEmptyNodeState());
-    world.resources.ui.neuronInspect = {
-      layer: target.layer,
-      lane: target.lane,
-      x: target.x,
-      y: target.y,
-      node: targetNode,
-    };
+    world.resources.ui.neuronInspect = null;
+    world.resources.ui.legendaryInspect = null;
     return true;
   }
   if (targetOccupied && !isValidNodePlacement(network, targetSnapshot, origin)) {
@@ -1471,13 +1558,8 @@ function commitNodeReorder(world, origin, target) {
 
   restoreNodeState(sourceNode, targetOccupied ? targetSnapshot : createEmptyNodeState());
   restoreNodeState(targetNode, sourceSnapshot);
-  world.resources.ui.neuronInspect = {
-    layer: target.layer,
-    lane: target.lane,
-    x: target.x,
-    y: target.y,
-    node: targetNode,
-  };
+  world.resources.ui.neuronInspect = null;
+  world.resources.ui.legendaryInspect = null;
   return true;
 }
 
@@ -1493,6 +1575,8 @@ function commitUpgradeTarget(world, target) {
   if (!result || !result.applied) {
     return;
   }
+  world.resources.ui.neuronInspect = null;
+  world.resources.ui.legendaryInspect = null;
   const layout = world.resources.layout;
   if (result.merged && layout) {
     createFlash(
@@ -1613,6 +1697,7 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
   if (shielded) {
     const absorbed = Math.min(enemy.shield, remainingDamage);
     enemy.shield -= absorbed;
+    enemy.shieldHitFlash = Math.max(enemy.shieldHitFlash || 0, 1);
     remainingDamage -= absorbed;
     createDamageText(world, contactX, contactY - enemy.radius * 0.4, Math.max(1, Math.round(absorbed)), "#9fdcff");
     createFlash(world, contactX, contactY, "rgba(143, 216, 255, 0.86)", enemy.radius * 1.04, {
@@ -1620,6 +1705,14 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
       accent: "rgba(221, 248, 255, 0.68)",
       life: 0.24,
     });
+    if (enemy.shield <= 0) {
+      enemy.shieldHitFlash = 0;
+      createFlash(world, contactX, contactY, "rgba(164, 232, 255, 0.94)", enemy.radius * 1.34, {
+        style: "shock",
+        accent: "rgba(244, 251, 255, 0.76)",
+        life: 0.38,
+      });
+    }
   }
   enemy.hp -= remainingDamage;
   enemy.hitFlash = Math.max(enemy.hitFlash || 0, 0.16);
@@ -1641,7 +1734,7 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
   if (!shielded) {
     enemy.status.slow = Math.max(enemy.status.slow, projectile.slow);
     enemy.status.freeze = Math.max(enemy.status.freeze, projectile.freeze * 1.35);
-    enemy.pushImpulse = Math.max(enemy.pushImpulse, projectile.pushback);
+    enemy.pushImpulse = Math.max(enemy.pushImpulse, projectile.pushback * (enemy.pushbackResistance || 1));
   }
 
   if (!shielded && projectile.freeze > 0 && hasLegendaryPerk(run, "thermal_feedback")) {
@@ -2391,6 +2484,15 @@ export function towerFireSystem(world, delta) {
     return;
   }
 
+  const chargeTarget = computeTurretChargeProgress(network);
+  const chargeBlend = chargeTarget >= (turret.chargeVisual || 0) ? 1 - Math.exp(-delta * 8.2) : 1 - Math.exp(-delta * 12.5);
+  turret.chargeVisual = (turret.chargeVisual || 0) + (chargeTarget - (turret.chargeVisual || 0)) * chargeBlend;
+  turret.chargeCycle = ((turret.chargeCycle || 0) + delta * (0.9 + chargeTarget * 3.1)) % (Math.PI * 2);
+  turret.chargeBurst = Math.max(0, (turret.chargeBurst || 0) - delta * 1.9);
+  turret.coreFlash = Math.max(0, (turret.coreFlash || 0) - delta * 2.8);
+  turret.muzzleFlash = Math.max(0, (turret.muzzleFlash || 0) - delta * 9.5);
+  turret.recoil = Math.max(0, (turret.recoil || 0) - delta * 7.8);
+
   let bestTarget = null;
   for (const entity of world.query("enemy")) {
     const enemy = world.getComponent(entity, "enemy");
@@ -2449,6 +2551,11 @@ export function towerFireSystem(world, delta) {
   });
   createFlash(world, muzzle.x, muzzle.y, COLORS.energyBright, 34);
   createFlash(world, layout.turretX, layout.turretY, COLORS.energy, 20);
+  turret.recoil = Math.max(turret.recoil || 0, 1);
+  turret.muzzleFlash = 1;
+  turret.coreFlash = 1;
+  turret.chargeBurst = Math.max(turret.chargeBurst || 0, 1);
+  turret.chargeVisual = Math.max(0, (turret.chargeVisual || 0) * 0.72);
 
   if (combinedEffects.shield > 0) {
     world.resources.run.shield = Math.min(8, world.resources.run.shield + combinedEffects.shield);
@@ -2487,6 +2594,8 @@ export function enemyMovementSystem(world, delta) {
       enemy.status.slow = 0;
       enemy.status.freeze = 0;
     }
+    enemy.shieldHitFlash = Math.max(0, (enemy.shieldHitFlash || 0) - delta * 3.2);
+    enemy.shieldVisualPulse = (enemy.shieldVisualPulse || 0) + delta;
     enemy.hitFlash = Math.max(0, (enemy.hitFlash || 0) - delta);
     enemy.hitNudgeX = (enemy.hitNudgeX || 0) * Math.max(0, 1 - delta * 18);
     enemy.hitNudgeY = (enemy.hitNudgeY || 0) * Math.max(0, 1 - delta * 18);
@@ -2560,9 +2669,12 @@ export function enemyMovementSystem(world, delta) {
       enemy.hp -= 1;
       enemy.hitFlash = Math.max(enemy.hitFlash || 0, 0.14);
       enemy.status.freeze = Math.max(enemy.status.freeze, 0.16);
-      enemy.pushImpulse = Math.max(enemy.pushImpulse, enemy.radius * 7);
+      enemy.pushImpulse = Math.max(enemy.pushImpulse, enemy.radius * 1.4 * (enemy.pushbackResistance || 1));
       enemy.shieldTouchCooldown = 0.16;
-      enemy.y = Math.max(layout.fieldTop + enemy.radius + layout.cell * 0.2, shieldHitY - enemy.radius * 2);
+      enemy.y = Math.max(
+        layout.fieldTop + enemy.radius + layout.cell * 0.2,
+        shieldHitY - enemy.radius * (1 + (enemy.shieldKnockbackDistance || 1)),
+      );
       createDamageText(world, enemyX, shieldHitY - enemy.radius * 0.4, "1", "#dff7ff");
       createFlash(world, enemyX, shieldHitY, "rgba(143, 216, 255, 0.86)", 42, {
         style: "shock",
@@ -3361,6 +3473,11 @@ function drawEnergySegment(ctx, x1, y1, x2, y2, progress, width, alpha, bend = 0
   ctx.stroke();
 }
 
+function softPulse(progress) {
+  const t = clamp(progress, 0, 1);
+  return smoothStep(t) * (0.78 + (1 - Math.abs(t - 0.5) * 2) * 0.22);
+}
+
 function segmentTravelProgress(progress, x1, y1, x2, y2, referenceLength) {
   const length = Math.hypot(x2 - x1, y2 - y1);
   const reference = Math.max(referenceLength, 1);
@@ -3554,15 +3671,22 @@ function drawNeuronNode(ctx, x, y, radius, node, activeAlpha, selected = false) 
   const effectStrength = Object.values(node.effects).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
   const linkStrength = Object.values(node.links).reduce((sum, value) => sum + Math.max(0, value || 0), 0);
   const nodeIntensity = clamp(effectStrength * 0.16 + linkStrength * 0.08 + node.power * 0.14 + (visualLevel - 1) * 0.2, 0, 1.4);
-  const baseFill = activeAlpha > 0 ? `rgba(89,245,214,${0.16 + activeAlpha * 0.24})` : "#16303f";
+  const signalGlow = clamp(activeAlpha || 0, 0, 1);
+  const baseFill = "#16303f";
   const baseStroke = visual ? visual.color : stats > 0 ? COLORS.energyBright : COLORS.line;
   const coreRadius = radius * 1.1;
+
+  if (signalGlow > 0.02) {
+    ctx.fillStyle = `rgba(89,245,214,${0.05 + signalGlow * 0.14})`;
+    pathRoundedRect(ctx, x - coreRadius * 1.14, y - coreRadius * 1.14, coreRadius * 2.28, coreRadius * 2.28, coreRadius * 0.28);
+    ctx.fill();
+  }
 
   ctx.fillStyle = "rgba(5, 8, 12, 0.22)";
   pathRoundedRect(ctx, x - coreRadius, y - coreRadius + radius * 0.16, coreRadius * 2, coreRadius * 2, coreRadius * 0.24);
   ctx.fill();
 
-  ctx.fillStyle = `rgba(255,255,255,${0.05 + nodeIntensity * 0.04})`;
+  ctx.fillStyle = `rgba(255,255,255,${0.04 + nodeIntensity * 0.03})`;
   pathRoundedRect(ctx, x - coreRadius, y - coreRadius, coreRadius * 2, coreRadius * 0.42, coreRadius * 0.2);
   ctx.fill();
 
@@ -3571,16 +3695,16 @@ function drawNeuronNode(ctx, x, y, radius, node, activeAlpha, selected = false) 
   ctx.fill();
 
   if (visual) {
-    ctx.fillStyle = visual.color + (visualLevel >= 3 ? "66" : visualLevel === 2 ? "52" : nodeIntensity > 0.02 ? "3a" : "26");
+    ctx.fillStyle = visual.color + (visualLevel >= 3 ? "5c" : visualLevel === 2 ? "46" : "30");
     pathUpgradeShape(ctx, visual.shape, x, y, radius * 1.02);
     ctx.fill();
-    if (nodeIntensity > 0.02) {
-      ctx.fillStyle = `rgba(255,255,255,${0.04 + nodeIntensity * 0.08 + (visualLevel - 1) * 0.06})`;
+    if (signalGlow > 0.02) {
+      ctx.fillStyle = `rgba(255,255,255,${0.04 + signalGlow * 0.16 + (visualLevel - 1) * 0.04})`;
       pathUpgradeShape(ctx, visual.shape, x, y, radius * (0.76 + nodeIntensity * 0.06));
       ctx.fill();
     }
     ctx.strokeStyle = visual.color;
-    ctx.lineWidth = (selected ? 3.6 : 3) + nodeIntensity * 1.2 + (visualLevel - 1) * 0.5;
+    ctx.lineWidth = (selected ? 3.6 : 3) + nodeIntensity * 0.5 + (visualLevel - 1) * 0.35 + signalGlow * 0.4;
     pathUpgradeShape(ctx, visual.shape, x, y, radius * 1.02);
     ctx.stroke();
     drawUpgradeGlyph(ctx, visual.id || visual.icon, x, y, radius * 0.92, "#f7fffd");
@@ -3594,7 +3718,7 @@ function drawNeuronNode(ctx, x, y, radius, node, activeAlpha, selected = false) 
     }
   } else {
     ctx.strokeStyle = baseStroke;
-    ctx.lineWidth = (selected ? 3.2 : stats > 0 ? 2.6 : 2) + nodeIntensity * 0.9;
+    ctx.lineWidth = (selected ? 3.2 : stats > 0 ? 2.6 : 2) + nodeIntensity * 0.4 + signalGlow * 0.4;
     pathRoundedRect(ctx, x - coreRadius, y - coreRadius, coreRadius * 2, coreRadius * 2, coreRadius * 0.24);
     ctx.stroke();
   }
@@ -4028,10 +4152,6 @@ function drawBackground(ctx, width, height) {
   bloom.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = bloom;
   ctx.fillRect(0, 0, width, height);
-
-  ctx.strokeStyle = "rgba(255, 244, 211, 0.06)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(10.5, 10.5, width - 21, height - 21);
 }
 
 function buildLayout(width, height) {
@@ -4125,12 +4245,14 @@ function shieldSurfaceY(layout, x) {
 }
 
 function drawCombatScene(world, ctx) {
-  const { layout, run, network } = world.resources;
+  const { layout, run, network, turret } = world.resources;
   const uiScale = layout.cell;
   const layerY = (layer) => networkLayerY(layout, layer);
   const activeLane = typeof network.activeInputLane === "number" ? network.activeInputLane : -1;
   const chargeProgress = network.pendingShot ? clamp(network.outputChargeTimer / Math.max(network.outputChargeStep, 0.001), 0, 1) : 0;
+  const chargeEase = softPulse(chargeProgress);
   const propagationProgress = clamp(network.inputChargeTimer / Math.max(network.inputChargeStep || 0.001, 0.001), 0, 1);
+  const propagationEase = softPulse(propagationProgress);
   const propagationStage = typeof network.inputStage === "number" ? network.inputStage : 0;
   const settledPacket = !!network.pendingShot && chargeProgress >= 0.999;
   const segmentReference = layout.cell * 1.7;
@@ -4144,25 +4266,34 @@ function drawCombatScene(world, ctx) {
   };
   const layerSignalProgress = (layer) => {
     if (network.pendingShot) {
-      return 1;
+      if (layer === NETWORK_LAYERS - 1) {
+        return 0.34;
+      }
+      if (layer === NETWORK_LAYERS - 2) {
+        return 0.18;
+      }
+      return 0;
     }
     if (layer < propagationStage) {
       return 1;
     }
     if (layer === propagationStage) {
-      return propagationProgress;
+      return propagationEase;
     }
     return 0;
   };
   const edgeSignalProgress = (layer, x1, y1, x2, y2) => {
     if (network.pendingShot) {
+      if (layer === NETWORK_LAYERS - 1) {
+        return segmentTravelProgress(chargeEase, x1, y1, x2, y2, segmentReference);
+      }
       return 1;
     }
     if (layer < propagationStage - 1) {
       return 1;
     }
     if (layer === propagationStage - 1) {
-      return segmentTravelProgress(propagationProgress, x1, y1, x2, y2, segmentReference);
+      return segmentTravelProgress(propagationEase, x1, y1, x2, y2, segmentReference);
     }
     return 0;
   };
@@ -4186,13 +4317,6 @@ function drawCombatScene(world, ctx) {
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
-
-  ctx.strokeStyle = "rgba(246, 248, 251, 0.12)";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(layout.gridX, layout.fieldTop - uiScale * 0.5);
-  ctx.lineTo(layout.gridX + layout.gridWidth, layout.fieldTop - uiScale * 0.5);
-  ctx.stroke();
 
   if ((run.shield || 0) > 0 || (run.shieldVisual || 0) > 0.01) {
     const { shieldY, shieldInset, domeHeight, rimY, highlightY, shieldCx, shieldRx, shieldRy } = shieldGeometry(layout);
@@ -4242,22 +4366,50 @@ function drawCombatScene(world, ctx) {
   ctx.fillStyle = "#352f38";
   ctx.fillRect(layout.gridX, layout.baseLineY, layout.gridWidth, uiScale * 0.45);
 
+  const packetShots = network.pendingShot ? network.pendingShot.shots || [] : [];
+  const currentPacketShot =
+    network.pendingShot && network.outputChargeIndex < packetShots.length
+      ? packetShots[network.outputChargeIndex]
+      : null;
+  const arrivedPacketLanes = new Set();
+  for (let shotIndex = 0; shotIndex < Math.min(network.outputChargeIndex || 0, packetShots.length); shotIndex += 1) {
+    arrivedPacketLanes.add(packetShots[shotIndex].lane);
+  }
+
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     const x = laneCenterX(layout, lane);
     const outputY = layerY(NETWORK_LAYERS - 1);
     const activeOutputs = network.pendingShot ? network.pendingShot.outputs || [] : [];
-    const charged = activeOutputs.indexOf(lane) !== -1;
+    const isInPacket = activeOutputs.indexOf(lane) !== -1;
+    const isCurrentCharge = !!(currentPacketShot && currentPacketShot.lane === lane);
+    const isArrived = arrivedPacketLanes.has(lane);
     const previewCharge = !network.pendingShot ? clamp((renderGrid[NETWORK_LAYERS - 1][lane] || 0) / 3.2, 0, 1) : 0;
-    const towerCharge = charged ? 0.42 + clamp(network.outputChargeTimer / Math.max(network.outputChargeStep, 0.001), 0, 1) * 0.58 : previewCharge;
-    const linkAlpha = charged ? 0.22 + towerCharge * 0.34 : 0.06 + previewCharge * 0.18;
-    const linkWidth = charged ? Math.max(2.4, uiScale * 0.16) : 1 + previewCharge * Math.max(1.2, uiScale * 0.08);
+    const towerCharge = network.pendingShot
+      ? isInPacket
+        ? 0.56
+        : isArrived
+          ? 0.34
+          : 0
+      : previewCharge * 0.82;
+    const linkAlpha = network.pendingShot
+      ? isInPacket
+        ? 0.34
+        : isArrived
+          ? 0.22
+          : 0
+      : 0.06 + previewCharge * 0.18;
+    const linkWidth = network.pendingShot
+      ? isInPacket
+        ? Math.max(2.3, uiScale * 0.15)
+        : isArrived
+          ? Math.max(1.8, uiScale * 0.12)
+          : 0
+      : 1 + previewCharge * Math.max(1.2, uiScale * 0.08);
     const turretBend = (layout.turretX - x) * 0.14;
     drawLinkCurve(ctx, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, linkWidth, `rgba(89,245,214,${linkAlpha})`, turretBend);
-    if (charged || previewCharge > 0.02) {
-      const turretPathProgress = charged
-        ? settledPacket
-          ? 1
-          : segmentTravelProgress(chargeProgress, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, segmentReference)
+    if (isCurrentCharge || isArrived || previewCharge > 0.02) {
+      const turretPathProgress = network.pendingShot
+        ? (isCurrentCharge || isArrived || isInPacket ? 1 : 0)
         : segmentTravelProgress(previewCharge, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, segmentReference);
       drawEnergySegment(
         ctx,
@@ -4266,22 +4418,40 @@ function drawCombatScene(world, ctx) {
         layout.turretX,
         layout.turretY - layout.cell * 0.2,
         turretPathProgress,
-        Math.max(3.2, uiScale * 0.22),
-        charged ? 0.78 : 0.42,
+        network.pendingShot
+          ? isInPacket
+            ? Math.max(2.8, uiScale * 0.19)
+            : Math.max(2.0, uiScale * 0.14)
+          : Math.max(2.0, uiScale * 0.14),
+        network.pendingShot
+          ? isInPacket
+            ? 0.56
+            : isArrived
+              ? 0.26
+              : 0
+          : 0.42,
         turretBend,
       );
     }
   }
 
-  const turretCharge = clamp(network.queuedShots.length / LANE_COUNT, 0.08, 1);
+  const turretChargeRaw = computeTurretChargeProgress(network);
+  const turretCharge = clamp(Math.max(0.08, turret.chargeVisual || turretChargeRaw), 0.08, 1);
+  const turretChargePhase = turret.chargeCycle || 0;
+  const turretChargeWave = Math.sin(turretChargePhase) * 0.5 + 0.5;
+  const turretBurst = turret.chargeBurst || 0;
+  const turretCoreFlash = turret.coreFlash || 0;
+  const turretMuzzleFlash = turret.muzzleFlash || 0;
+  const turretRecoil = turret.recoil || 0;
   const turretBaseW = layout.cell * 2.6;
   const turretBaseH = layout.cell * 0.42;
   const turretHeadW = layout.cell * 1.48;
   const turretHeadH = layout.cell * 1.02;
-  const barrelLength = layout.cell * 1.06;
+  const barrelLength = layout.cell * (1.06 - turretRecoil * 0.08);
   const barrelWidth = Math.max(4, layout.cell * 0.18);
-  const barrelStartX = layout.turretX + Math.cos(world.resources.turret.angle) * layout.cell * 0.46;
-  const barrelStartY = layout.turretY + Math.sin(world.resources.turret.angle) * layout.cell * 0.46;
+  const barrelStartOffset = layout.cell * (0.46 - turretRecoil * 0.1);
+  const barrelStartX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelStartOffset;
+  const barrelStartY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelStartOffset;
   const barrelX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelLength;
   const barrelY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelLength;
 
@@ -4353,6 +4523,16 @@ function drawCombatScene(world, ctx) {
     layout.cell * 0.08,
   );
   ctx.fill();
+  ctx.fillStyle = `rgba(143,216,255,${0.12 + turretCharge * 0.1 + turretChargeWave * 0.06 + turretBurst * 0.1})`;
+  pathRoundedRect(
+    ctx,
+    layout.turretX - turretBaseW * 0.44,
+    layout.turretY + layout.cell * 0.34,
+    turretBaseW * 0.88 * clamp(turretCharge * 0.72 + turretBurst * 0.14, 0, 1),
+    layout.cell * 0.08,
+    layout.cell * 0.05,
+  );
+  ctx.fill();
 
   ctx.save();
   ctx.translate(layout.turretX, layout.turretY - layout.cell * 0.02);
@@ -4382,6 +4562,14 @@ function drawCombatScene(world, ctx) {
   ctx.beginPath();
   ctx.arc(0, 0, layout.cell * 0.19 + turretCharge * layout.cell * 0.05, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = `rgba(143,216,255,${0.1 + turretCharge * 0.24 + turretCoreFlash * 0.2})`;
+  ctx.lineWidth = Math.max(1.2, layout.cell * 0.06);
+  ctx.beginPath();
+  ctx.arc(0, 0, layout.cell * (0.34 + turretCharge * 0.06), -Math.PI * 0.68 + turretChargePhase * 0.18, Math.PI * 0.18 + turretChargePhase * 0.18);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(0, 0, layout.cell * (0.42 + turretCharge * 0.08), Math.PI * 0.22 - turretChargePhase * 0.14, Math.PI * 0.94 - turretChargePhase * 0.14);
+  ctx.stroke();
   ctx.strokeStyle = COLORS.energyBright;
   ctx.lineWidth = 1.6;
   ctx.beginPath();
@@ -4408,6 +4596,27 @@ function drawCombatScene(world, ctx) {
   ctx.moveTo(layout.cell * 0.25, 0);
   ctx.lineTo(barrelLength, 0);
   ctx.stroke();
+  ctx.strokeStyle = `rgba(143,216,255,${0.08 + turretCharge * 0.28 + turretBurst * 0.18})`;
+  ctx.lineWidth = Math.max(1.4, barrelWidth * 0.24);
+  ctx.beginPath();
+  ctx.moveTo(layout.cell * 0.24, 0);
+  ctx.lineTo(barrelLength, 0);
+  ctx.stroke();
+  if (turretCharge > 0.12 || turretMuzzleFlash > 0.01) {
+    const muzzleGlow = 0.12 + turretCharge * 0.22 + turretMuzzleFlash * 0.54;
+    ctx.fillStyle = `rgba(143,216,255,${muzzleGlow})`;
+    ctx.beginPath();
+    ctx.ellipse(
+      barrelLength + layout.cell * 0.05,
+      0,
+      layout.cell * (0.08 + turretCharge * 0.08 + turretMuzzleFlash * 0.12),
+      layout.cell * (0.14 + turretCharge * 0.06 + turretMuzzleFlash * 0.12),
+      0,
+      0,
+      Math.PI * 2,
+    );
+    ctx.fill();
+  }
 
   ctx.fillStyle = "#13283f";
   pathRoundedRect(ctx, layout.cell * 0.06, -layout.cell * 0.12, layout.cell * 0.44, layout.cell * 0.24, layout.cell * 0.08);
@@ -4419,10 +4628,22 @@ function drawCombatScene(world, ctx) {
 
   ctx.restore();
 
-  ctx.fillStyle = `rgba(216,191,132,${0.18 + turretCharge * 0.26})`;
+  ctx.fillStyle = `rgba(143,216,255,${0.08 + turretCharge * 0.12 + turretBurst * 0.1})`;
   ctx.beginPath();
-  ctx.arc(barrelX, barrelY, layout.cell * 0.11, 0, Math.PI * 2);
+  ctx.arc(barrelStartX, barrelStartY, layout.cell * (0.09 + turretCharge * 0.03), 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.fillStyle = `rgba(216,191,132,${0.18 + turretCharge * 0.26 + turretBurst * 0.12})`;
+  ctx.beginPath();
+  ctx.arc(barrelX, barrelY, layout.cell * (0.11 + turretMuzzleFlash * 0.04), 0, Math.PI * 2);
+  ctx.fill();
+  if (turretCharge > 0.08 || turretBurst > 0.01) {
+    ctx.strokeStyle = `rgba(143,216,255,${0.1 + turretCharge * 0.16 + turretBurst * 0.2})`;
+    ctx.lineWidth = Math.max(1.4, layout.cell * 0.06);
+    ctx.beginPath();
+    ctx.arc(layout.turretX, layout.turretY - layout.cell * 0.02, layout.cell * (0.62 + turretChargeWave * 0.04), -Math.PI * 0.84, -Math.PI * 0.18);
+    ctx.stroke();
+  }
 
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
@@ -4519,8 +4740,10 @@ function drawCombatScene(world, ctx) {
           resonanceBend,
         );
         if (resonanceGlow > 0.02) {
-          const resonanceProgress = layer === NETWORK_LAYERS - 1
-            ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, x, y, rightX, y, segmentReference))
+          const resonanceProgress = network.pendingShot
+            ? 1
+            : layer === NETWORK_LAYERS - 1
+              ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, x, y, rightX, y, segmentReference))
             : edgeSignalProgress(layer, x, y, rightX, y);
           drawEnergySegment(
             ctx,
@@ -4559,8 +4782,10 @@ function drawCombatScene(world, ctx) {
               y,
               leftTargetX,
               y,
-              layer === NETWORK_LAYERS - 1
-                ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, x, y, laneCenterX(layout, lane - 1), y, segmentReference))
+              network.pendingShot
+                ? 1
+                : layer === NETWORK_LAYERS - 1
+                  ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, x, y, laneCenterX(layout, lane - 1), y, segmentReference))
                 : edgeSignalProgress(layer, x, y, laneCenterX(layout, lane - 1), y),
               Math.max(2.4, uiScale * 0.17),
               0.68,
@@ -4578,8 +4803,10 @@ function drawCombatScene(world, ctx) {
               y,
               rightTargetX,
               y,
-              layer === NETWORK_LAYERS - 1
-                ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, x, y, laneCenterX(layout, lane + 1), y, segmentReference))
+              network.pendingShot
+                ? 1
+                : layer === NETWORK_LAYERS - 1
+                  ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, x, y, laneCenterX(layout, lane + 1), y, segmentReference))
                 : edgeSignalProgress(layer, x, y, laneCenterX(layout, lane + 1), y),
               Math.max(2.4, uiScale * 0.17),
               0.68,
@@ -4613,8 +4840,10 @@ function drawCombatScene(world, ctx) {
               y,
               x,
               y,
-              layer === NETWORK_LAYERS - 1
-                ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, laneCenterX(layout, lane - 1), y, x, y, segmentReference))
+              network.pendingShot
+                ? 1
+                : layer === NETWORK_LAYERS - 1
+                  ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, laneCenterX(layout, lane - 1), y, x, y, segmentReference))
                 : edgeSignalProgress(layer, laneCenterX(layout, lane - 1), y, x, y),
               Math.max(2.4, uiScale * 0.17),
               0.68,
@@ -4632,8 +4861,10 @@ function drawCombatScene(world, ctx) {
               y,
               x,
               y,
-              layer === NETWORK_LAYERS - 1
-                ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, laneCenterX(layout, lane + 1), y, x, y, segmentReference))
+              network.pendingShot
+                ? 1
+                : layer === NETWORK_LAYERS - 1
+                  ? (settledPacket ? 1 : segmentTravelProgress(chargeProgress, laneCenterX(layout, lane + 1), y, x, y, segmentReference))
                 : edgeSignalProgress(layer, laneCenterX(layout, lane + 1), y, x, y),
               Math.max(2.4, uiScale * 0.17),
               0.68,
@@ -4647,28 +4878,25 @@ function drawCombatScene(world, ctx) {
       const stageGlow = routeActive ? layerSignalProgress(layer) : 0;
       const nodeGlow = routeActive
         ? network.pendingShot
-          ? 0.38 + chargeProgress * 0.34
-          : 0.14 + stageGlow * 0.54
-        : active > 0
-          ? 0.14 + active * 0.16
-          : 0;
-      const nodeRadius = layout.cell * 0.64 + (routeActive ? chargeProgress * 2.4 : active * 2.1);
+          ? layer === NETWORK_LAYERS - 1
+            ? 0.42
+            : layer === NETWORK_LAYERS - 2
+              ? 0.16
+              : 0
+          : 0.18 + stageGlow * 0.34
+        : 0;
+      const nodeRadius = layout.cell * 0.64;
       drawNeuronNode(ctx, x, y, nodeRadius, node, nodeGlow, false);
-      if (routeActive && !network.pendingShot) {
-        ctx.fillStyle = `rgba(230,255,251,${0.08 + layerSignalProgress(layer) * 0.54})`;
-        pathRoundedRect(ctx, x - nodeRadius * 0.76, y - nodeRadius * 0.76, nodeRadius * 1.52, nodeRadius * 1.52, nodeRadius * 0.24);
-        ctx.fill();
-      }
     }
   }
 
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     const x = laneCenterX(layout, lane);
-    if (lane === activeLane) {
-      const sourceStrength = network.pendingShot ? 0.18 + chargeProgress * 0.62 : 0.16 + layerSignalProgress(0) * 0.54;
+    if (lane === activeLane && !network.pendingShot) {
+      const sourceStrength = 0.14 + layerSignalProgress(0) * 0.42;
       ctx.fillStyle = `rgba(89,245,214,${sourceStrength})`;
       ctx.beginPath();
-      ctx.arc(x, layerY(0), layout.cell * 0.28 + layerSignalProgress(0) * 4, 0, Math.PI * 2);
+      ctx.arc(x, layerY(0), layout.cell * 0.28 + layerSignalProgress(0) * 3.2, 0, Math.PI * 2);
       ctx.fill();
     }
   }
@@ -4678,7 +4906,9 @@ function drawCombatScene(world, ctx) {
     const baseX = enemyScreenX(layout, enemy);
     const x = baseX + (enemy.hitNudgeX || 0);
     const y = enemy.y + (enemy.hitNudgeY || 0);
+    drawEnemyShield(ctx, enemy, x, y, "back");
     drawEnemy(ctx, enemy, x, y);
+    drawEnemyShield(ctx, enemy, x, y, "front");
     if (enemy.hitFlash > 0) {
       const hitAlpha = clamp(enemy.hitFlash / 0.16, 0, 1);
       ctx.globalAlpha = hitAlpha * 0.58;
@@ -5525,6 +5755,12 @@ export function resetRun(world, restoredProgress = null) {
     angle: -Math.PI / 2,
     targetAngle: -Math.PI / 2,
     cooldown: 0,
+    chargeVisual: 0,
+    chargeCycle: 0,
+    chargeBurst: 0,
+    coreFlash: 0,
+    muzzleFlash: 0,
+    recoil: 0,
   };
   const progress = restoredProgress || readMetaProgress();
   if (progress) {

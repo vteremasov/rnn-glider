@@ -11,16 +11,21 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg: #14171d;
-        --panel: #1c222b;
-        --panel-2: #232a34;
-        --line: rgba(246, 248, 251, 0.12);
-        --text: #eef1f6;
-        --text-dim: #b1bbc9;
+        --bg: #11161c;
+        --bg-deep: #0b1015;
+        --panel: rgba(24, 31, 39, 0.92);
+        --panel-2: rgba(30, 39, 48, 0.94);
+        --panel-3: rgba(17, 22, 28, 0.92);
+        --line: rgba(194, 222, 255, 0.12);
+        --line-strong: rgba(143, 216, 255, 0.24);
+        --text: #eef4fb;
+        --text-dim: #a9b7c7;
         --accent: #8fd8ff;
+        --accent-2: #7ce8cb;
         --warn: #ffd89a;
         --good: #95c19c;
         --bad: #d27a67;
+        --shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
       }
 
       * {
@@ -31,8 +36,9 @@
         margin: 0;
         min-height: 100vh;
         background:
-          radial-gradient(circle at top, rgba(143, 216, 255, 0.08), transparent 28%),
-          linear-gradient(180deg, #1d232b, var(--bg) 52%, #101318);
+          radial-gradient(circle at top, rgba(143, 216, 255, 0.08), transparent 22%),
+          radial-gradient(circle at 20% 0%, rgba(124, 232, 203, 0.06), transparent 18%),
+          linear-gradient(180deg, #182028, var(--bg) 28%, var(--bg-deep));
         color: var(--text);
         font: 14px/1.45 "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
       }
@@ -43,58 +49,120 @@
       }
 
       .shell {
-        width: min(1240px, calc(100vw - 32px));
+        width: min(1180px, calc(100vw - 24px));
         margin: 0 auto;
-        padding: 24px 0 48px;
+        padding: 14px 0 40px;
       }
 
       .topbar {
-        display: flex;
+        display: grid;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .hero-card,
+      .hero-actions {
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background:
+          linear-gradient(180deg, rgba(39, 48, 60, 0.84), rgba(19, 25, 32, 0.94)),
+          var(--panel);
+        box-shadow: var(--shadow);
+        position: relative;
+        overflow: hidden;
+      }
+
+      .hero-card::before,
+      .hero-actions::before,
+      .panel::before {
+        content: "";
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(143, 216, 255, 0.24), transparent);
+        pointer-events: none;
+      }
+
+      .title {
+        padding: 18px 18px 20px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
         align-items: center;
-        justify-content: space-between;
-        gap: 16px;
-        margin-bottom: 20px;
+        gap: 8px;
+        margin-bottom: 10px;
+        padding: 5px 10px;
+        border: 1px solid rgba(143, 216, 255, 0.18);
+        border-radius: 999px;
+        background: rgba(15, 21, 27, 0.44);
+        font-size: 11px;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        color: var(--accent);
       }
 
       .title h1 {
         margin: 0;
-        font-size: 28px;
+        font-size: 42px;
+        line-height: 0.92;
+        letter-spacing: -0.04em;
+        max-width: 8ch;
       }
 
       .title p {
-        margin: 6px 0 0;
+        margin: 12px 0 0;
         color: var(--text-dim);
+        max-width: 28ch;
+        font-size: 16px;
       }
 
       .linkbar {
-        display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
+        display: grid;
+        gap: 10px;
+        padding: 14px;
       }
 
       .linkbar a {
-        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        min-height: 56px;
+        padding: 12px 14px;
         border: 1px solid var(--line);
-        border-radius: 12px;
-        background: rgba(28, 34, 43, 0.84);
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(29, 38, 48, 0.94), rgba(21, 28, 36, 0.96));
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      }
+
+      .linkbar a::after {
+        content: "↗";
+        color: var(--accent);
+        font-size: 15px;
       }
 
       .grid {
         display: grid;
-        gap: 18px;
+        gap: 14px;
       }
 
       .panel {
         border: 1px solid var(--line);
-        border-radius: 18px;
-        background: rgba(28, 34, 43, 0.92);
-        padding: 18px;
-        box-shadow: 0 12px 34px rgba(0, 0, 0, 0.22);
+        border-radius: 22px;
+        background:
+          linear-gradient(180deg, rgba(31, 39, 48, 0.84), rgba(18, 24, 31, 0.96)),
+          var(--panel);
+        padding: 16px;
+        box-shadow: var(--shadow);
+        position: relative;
+        overflow: hidden;
       }
 
       .panel h2 {
-        margin: 0 0 12px;
-        font-size: 20px;
+        margin: 0 0 14px;
+        font-size: 22px;
+        letter-spacing: -0.03em;
       }
 
       .panel h3 {
@@ -119,8 +187,8 @@
       select {
         width: 100%;
         border: 1px solid var(--line);
-        border-radius: 12px;
-        background: rgba(16, 20, 26, 0.92);
+        border-radius: 14px;
+        background: rgba(11, 16, 21, 0.92);
         padding: 10px 12px;
       }
 
@@ -131,15 +199,43 @@
 
       button {
         border: 1px solid var(--line);
-        border-radius: 12px;
-        background: rgba(36, 45, 56, 0.96);
+        border-radius: 14px;
+        background: linear-gradient(180deg, rgba(36, 45, 56, 0.98), rgba(25, 31, 39, 0.98));
         padding: 10px 14px;
         cursor: pointer;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
       }
 
       button.primary {
         border-color: rgba(143, 216, 255, 0.34);
-        background: rgba(44, 69, 92, 0.96);
+        background: linear-gradient(180deg, rgba(55, 82, 108, 0.98), rgba(35, 55, 74, 0.98));
+      }
+
+      .rule-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .rule-tile {
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        padding: 12px;
+        background: linear-gradient(180deg, rgba(19, 25, 31, 0.96), rgba(13, 18, 24, 0.96));
+      }
+
+      .rule-tile strong {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+        color: var(--accent);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      .rule-tile span {
+        color: var(--text);
+        font-size: 15px;
       }
 
       .roadmap {
@@ -168,10 +264,10 @@
 
       .lane {
         border: 1px solid var(--line);
-        border-radius: 14px;
-        background: rgba(20, 24, 31, 0.88);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(18, 24, 31, 0.92), rgba(12, 17, 23, 0.96));
         padding: 12px;
-        min-height: 180px;
+        min-height: 160px;
       }
 
       .lane-head {
@@ -188,9 +284,9 @@
 
       .task {
         border: 1px solid var(--line);
-        border-radius: 12px;
-        background: rgba(30, 36, 44, 0.94);
-        padding: 10px;
+        border-radius: 16px;
+        background: linear-gradient(180deg, rgba(31, 38, 47, 0.96), rgba(21, 27, 34, 0.98));
+        padding: 12px;
       }
 
       .task.is-done {
@@ -246,9 +342,10 @@
       .chip {
         border: 1px solid var(--line);
         border-radius: 999px;
-        padding: 3px 8px;
+        padding: 4px 9px;
         font-size: 12px;
         color: var(--text-dim);
+        background: rgba(13, 18, 24, 0.62);
       }
 
       .task-actions {
@@ -263,16 +360,20 @@
       }
 
       .tabbar {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
-        flex-wrap: wrap;
         margin-bottom: 14px;
       }
 
+      .tabbar button {
+        min-height: 52px;
+      }
+
       .toolbar {
-        display: flex;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 10px;
-        flex-wrap: wrap;
         margin-bottom: 14px;
       }
 
@@ -287,7 +388,8 @@
 
       .tabbar button.active {
         border-color: rgba(143, 216, 255, 0.36);
-        background: rgba(44, 69, 92, 0.96);
+        background: linear-gradient(180deg, rgba(65, 94, 122, 0.98), rgba(45, 65, 87, 0.98));
+        color: #f3fbff;
       }
 
       .catalog-list {
@@ -297,8 +399,8 @@
 
       .catalog-item {
         border: 1px solid var(--line);
-        border-radius: 14px;
-        background: rgba(20, 24, 31, 0.9);
+        border-radius: 18px;
+        background: linear-gradient(180deg, rgba(20, 24, 31, 0.94), rgba(13, 18, 24, 0.98));
         padding: 12px;
       }
 
@@ -324,10 +426,70 @@
         font-size: 13px;
       }
 
+      @media (min-width: 900px) {
+        .topbar {
+          grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+          align-items: stretch;
+        }
+
+        .linkbar {
+          grid-template-columns: 1fr;
+          height: 100%;
+          align-content: center;
+        }
+
+        .grid {
+          gap: 18px;
+        }
+
+        .tabbar {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+      }
+
       @media (max-width: 980px) {
         .roadmap,
         .catalog {
           grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 680px) {
+        .shell {
+          width: min(100vw - 16px, 100%);
+          padding-top: 8px;
+        }
+
+        .title {
+          padding: 16px;
+        }
+
+        .title h1 {
+          font-size: 30px;
+          max-width: 7ch;
+        }
+
+        .title p {
+          font-size: 15px;
+          max-width: none;
+        }
+
+        .rule-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .toolbar,
+        .tabbar {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .section-tools {
+          align-items: stretch;
+        }
+
+        .section-tools button,
+        .toolbar button {
+          width: 100%;
         }
       }
     </style>
@@ -335,11 +497,12 @@
   <body>
     <div class="shell">
       <div class="topbar">
-        <div class="title">
+        <div class="hero-card title">
+          <div class="eyebrow">Control Console</div>
           <h1>Neural Bastion Admin</h1>
           <p>Ideas, roadmap, upgrade catalog, and legendary reference.</p>
         </div>
-        <div class="linkbar">
+        <div class="hero-actions linkbar">
           <a href="/">Open Game</a>
           <a href="/#dev" target="_blank" rel="noopener noreferrer">Open Game Dev</a>
           <a href="/#debug">Open Game Debug</a>
@@ -349,11 +512,23 @@
       <div class="grid">
         <section class="panel">
           <h2>Current Rules</h2>
-          <div class="chip-row">
-            <span class="chip">Every applied upgrade: +1 white route damage</span>
-            <span class="chip">Max merge level per node: 3</span>
-            <span class="chip">Boss branch depth: 13</span>
-            <span class="chip">Pre-boss fork: Shop / Camp</span>
+          <div class="rule-grid">
+            <div class="rule-tile">
+              <strong>White Damage</strong>
+              <span>Every applied upgrade gives +1 white route damage.</span>
+            </div>
+            <div class="rule-tile">
+              <strong>Merge Cap</strong>
+              <span>Each node can merge up to level 3.</span>
+            </div>
+            <div class="rule-tile">
+              <strong>Boss Depth</strong>
+              <span>Each branch reaches its boss at depth 13.</span>
+            </div>
+            <div class="rule-tile">
+              <strong>Pre-Boss Fork</strong>
+              <span>The last guaranteed choice is Shop or Camp.</span>
+            </div>
           </div>
         </section>
 
@@ -363,6 +538,7 @@
             <button type="button" data-tab="roadmap" class="active" role="tab" aria-selected="true">Roadmap</button>
             <button type="button" data-tab="upgrades" role="tab" aria-selected="false">Upgrades</button>
             <button type="button" data-tab="legendary" role="tab" aria-selected="false">Legendary Items</button>
+            <button type="button" data-tab="enemies" role="tab" aria-selected="false">Enemies</button>
           </div>
           <div class="toolbar">
             <button id="copy-json" class="primary" type="button">Copy JSON</button>
@@ -387,6 +563,11 @@
           <section id="catalog-legendary" hidden>
             <h3>Legendary Items</h3>
             <div id="legendary-list" class="catalog-list"></div>
+          </section>
+
+          <section id="catalog-enemies" hidden>
+            <h3>Enemy Types</h3>
+            <div id="enemy-list" class="catalog-list"></div>
           </section>
         </section>
       </div>
