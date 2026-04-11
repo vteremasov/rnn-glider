@@ -8,11 +8,17 @@ export function createEnemy(world, lane, kind) {
   const laneSpacing = layout && typeof layout.laneSpacing === "number" ? layout.laneSpacing : unit * 2.4;
   const isBeetle = kind.family === "beetle";
   const radius = kind.boss
-    ? Math.max(unit * (isBeetle ? 1.04 : 0.9), Math.min(kind.radius, unit * (isBeetle ? 1.62 : 1.28)))
+    ? Math.max(unit * (isBeetle ? 1.12 : 0.9), Math.min(kind.radius, unit * (isBeetle ? 1.92 : 1.28)))
     : kind.elite
-    ? Math.max(unit * (isBeetle ? 0.64 : 0.52), Math.min(kind.radius, unit * (isBeetle ? 1.02 : 0.82)))
-    : Math.max(unit * (isBeetle ? 0.28 : 0.22), Math.min(kind.radius, unit * (isBeetle ? 0.48 : 0.38)));
+    ? Math.max(unit * (isBeetle ? 0.74 : 0.52), Math.min(kind.radius, unit * (isBeetle ? 1.2 : 0.82)))
+    : Math.max(unit * (isBeetle ? 0.22 : 0.22), Math.min(kind.radius, unit * (isBeetle ? 0.58 : 0.38)));
   const spawnY = fieldTop - radius - unit * 0.4;
+  const laneX = layout && typeof layout.gridWidth === "number"
+    ? laneCenterX(layout, lane)
+    : lane * laneSpacing;
+  const bossSweepAnchorOffset = kind.boss && layout
+    ? layout.gridX + layout.gridWidth * 0.5 - laneX
+    : 0;
   world.addComponent(entity, "enemy", {
     lane,
     y: spawnY,
@@ -29,6 +35,11 @@ export function createEnemy(world, lane, kind) {
     reward: kind.reward,
     damage: kind.damage,
     tint: kind.tint,
+    bossAbility: kind.bossAbility || null,
+    bossStage: kind.bossStage || (kind.shape === "butterfly" ? "butterfly" : null),
+    summonInterval: typeof kind.summonInterval === "number" ? kind.summonInterval : 0,
+    summonTimer: typeof kind.summonInterval === "number" ? kind.summonInterval : 0,
+    splitTriggered: false,
     status: {
       burn: 0,
       curse: 0,
@@ -50,6 +61,12 @@ export function createEnemy(world, lane, kind) {
     burnHold: 0,
     curseHold: 0,
     xOffset: 0,
+    bossSweepAnchorOffset,
+    bossSweepTime: 0,
+    bossSweepAmplitude: kind.boss && layout
+      ? Math.max(layout.gridWidth * 0.36, layout.gridWidth * 0.5 - unit * 1.35)
+      : 0,
+    bossSweepPeriod: kind.boss ? 4.8 : 0,
     wormZigzagTime: 0,
     wormZigzagAmplitude: kind.family === "worm" ? Math.min(unit * 0.96, laneSpacing * 0.32) : 0,
     wormZigzagPeriod: kind.family === "worm" ? (kind.boss ? 2.05 : kind.elite ? 1.82 : 1.56) : 0,

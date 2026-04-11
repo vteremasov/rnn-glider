@@ -327,6 +327,63 @@ function drawWormEnemy(ctx, enemy, x, y) {
   ctx.fill();
 }
 
+function drawButterflyBoss(ctx, enemy, x, y) {
+  const radius = enemy.radius;
+  ctx.fillStyle = "rgba(7, 10, 14, 0.24)";
+  ctx.beginPath();
+  ctx.ellipse(x, y + radius * 1.08, radius * 1.18, radius * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const flap = Math.sin((enemy.wormZigzagTime || 0) * 7.2) * radius * 0.08;
+  const wingTint = enemy.tint || "#b98060";
+
+  ctx.fillStyle = wingTint;
+  ctx.beginPath();
+  ctx.moveTo(x - radius * 0.18, y - radius * 0.08);
+  ctx.quadraticCurveTo(x - radius * 1.48, y - radius * (0.98 + flap * 0.02), x - radius * 1.22, y + radius * 0.18);
+  ctx.quadraticCurveTo(x - radius * 0.76, y + radius * 0.66, x - radius * 0.08, y + radius * 0.18);
+  ctx.closePath();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x + radius * 0.18, y - radius * 0.08);
+  ctx.quadraticCurveTo(x + radius * 1.48, y - radius * (0.98 + flap * 0.02), x + radius * 1.22, y + radius * 0.18);
+  ctx.quadraticCurveTo(x + radius * 0.76, y + radius * 0.66, x + radius * 0.08, y + radius * 0.18);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.fillStyle = "rgba(244, 248, 251, 0.16)";
+  ctx.beginPath();
+  ctx.ellipse(x - radius * 0.62, y - radius * 0.14, radius * 0.38, radius * 0.22, -0.28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x + radius * 0.62, y - radius * 0.14, radius * 0.38, radius * 0.22, 0.28, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = "#121a24";
+  ctx.beginPath();
+  ctx.ellipse(x, y + radius * 0.08, radius * 0.2, radius * 0.82, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x, y - radius * 0.46, radius * 0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(120, 214, 255, 0.46)";
+  ctx.lineWidth = Math.max(1.3, radius * 0.05);
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(x - radius * 0.08, y - radius * 0.54);
+  ctx.lineTo(x - radius * 0.24, y - radius * 0.92);
+  ctx.moveTo(x + radius * 0.08, y - radius * 0.54);
+  ctx.lineTo(x + radius * 0.24, y - radius * 0.92);
+  ctx.stroke();
+
+  ctx.fillStyle = "#8df3ff";
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.07, y - radius * 0.48, Math.max(1.4, radius * 0.04), 0, Math.PI * 2);
+  ctx.arc(x + radius * 0.07, y - radius * 0.48, Math.max(1.4, radius * 0.04), 0, Math.PI * 2);
+  ctx.fill();
+}
+
 function drawBeetleEnemy(ctx, enemy, x, y) {
   const radius = enemy.radius;
   ctx.fillStyle = "rgba(7, 10, 14, 0.28)";
@@ -367,6 +424,10 @@ function drawBeetleEnemy(ctx, enemy, x, y) {
 }
 
 function drawEnemy(ctx, enemy, x, y) {
+  if (enemy.family === "worm" && enemy.boss && enemy.bossStage === "butterfly") {
+    drawButterflyBoss(ctx, enemy, x, y);
+    return;
+  }
   if (enemy.family === "worm") {
     drawWormEnemy(ctx, enemy, x, y);
     return;
@@ -637,7 +698,7 @@ function enemyKinds(wave, roomType, branchTheme = "spider", run = null) {
         speed: 15 + wave * 0.55,
         reward: elite ? 12 : 7,
         damage: 1,
-        radius: 17,
+        radius: 20,
         shape: "diamond",
         tint: "#7f9361",
         weight: 0.95,
@@ -648,7 +709,7 @@ function enemyKinds(wave, roomType, branchTheme = "spider", run = null) {
         speed: 11 + wave * 0.46,
         reward: elite ? 16 : 10,
         damage: wave >= 2 ? 2 : 1,
-        radius: 21,
+        radius: 25,
         shape: "square",
         tint: "#91aa72",
         weight: 1.2,
@@ -659,7 +720,7 @@ function enemyKinds(wave, roomType, branchTheme = "spider", run = null) {
         speed: 13 + wave * 0.48,
         reward: elite ? 14 : 8,
         damage: 1,
-        radius: 18,
+        radius: 21,
         shape: "triangle",
         tint: "#aabf8b",
         weight: 0.7,
@@ -726,7 +787,7 @@ function eliteSpiderKind(wave, branchTheme = "spider", run = null) {
       speed: 6.2 + wave * 0.24,
       reward: 38 + wave * 9,
       damage: 999,
-      radius: 74,
+      radius: 88,
       shape: "elite",
       tint: "#849866",
     };
@@ -752,15 +813,15 @@ function bossSpiderKind(wave, branchTheme = "spider", run = null) {
       boss: true,
       family: "worm",
       hp,
-      shield: hp,
       pushbackResistance: 0.25,
       shieldKnockbackDistance: 0.25,
       speed: 6.5 + wave * 0.2,
       reward: 56 + wave * 10,
       damage: 999,
-      radius: 76,
-      shape: "elite",
+      radius: 112,
+      shape: "butterfly",
       tint: "#b98060",
+      bossAbility: "split_worm",
     };
   }
   if (branchTheme === "beetle") {
@@ -769,15 +830,16 @@ function bossSpiderKind(wave, branchTheme = "spider", run = null) {
       boss: true,
       family: "beetle",
       hp,
-      shield: hp,
       pushbackResistance: 0.25,
       shieldKnockbackDistance: 0.25,
       speed: 5.4 + wave * 0.18,
       reward: 56 + wave * 10,
       damage: 999,
-      radius: 96,
+      radius: 118,
       shape: "elite",
       tint: "#7f9361",
+      bossAbility: "summon_beetle",
+      summonInterval: 1,
     };
   }
   return {
@@ -1863,6 +1925,53 @@ function beginWave(world, roomType) {
   };
   world.resources.phase.name = "combat";
   world.resources.ui.buttons = [];
+}
+
+function createEnemyAt(world, lane, kind, y, extra = {}) {
+  const entity = createEnemy(world, lane, kind);
+  const enemy = world.getComponent(entity, "enemy");
+  if (enemy) {
+    enemy.y = y;
+    Object.assign(enemy, extra);
+  }
+  return entity;
+}
+
+function beetleBossSummonKind(wave, run = null) {
+  return {
+    family: "beetle",
+    hp: 1,
+    speed: 28 + wave * 0.7,
+    reward: 0,
+    damage: 1,
+    radius: 12,
+    shape: "square",
+    tint: "#97b46f",
+  };
+}
+
+function spawnBeetleBossMinion(world, bossEnemy) {
+  const laneShift = world.resources.rng() < 0.5 ? -1 : 1;
+  const lane = clamp(bossEnemy.lane + laneShift, 0, LANE_COUNT - 1);
+  const kind = beetleBossSummonKind(world.resources.run.wave, world.resources.run);
+  createEnemyAt(world, lane, kind, bossEnemy.y - bossEnemy.radius * 0.72, {
+    xOffset: bossEnemy.xOffset || 0,
+  });
+}
+
+function splitWormBoss(world, entity, enemy) {
+  const eliteKind = eliteSpiderKind(world.resources.run.wave, "worm", world.resources.run);
+  const spacing = world.resources.layout ? world.resources.layout.cell * 0.2 : 0;
+  const leftLane = clamp(enemy.lane - 1, 0, LANE_COUNT - 1);
+  const rightLane = clamp(enemy.lane + 1, 0, LANE_COUNT - 1);
+  createFlash(world, enemyScreenX(world.resources.layout, enemy), enemy.y, "rgba(246, 248, 251, 0.92)", enemy.radius * 1.18, {
+    style: "shock",
+    accent: enemy.tint || COLORS.energyBright,
+    life: 0.34,
+  });
+  createEnemyAt(world, leftLane, eliteKind, enemy.y - enemy.radius * 0.16, { xOffset: -spacing });
+  createEnemyAt(world, rightLane, eliteKind, enemy.y - enemy.radius * 0.16, { xOffset: spacing });
+  world.destroyEntity(entity);
 }
 
 function summonKind(world) {
@@ -2962,6 +3071,14 @@ export function enemyMovementSystem(world, delta) {
     enemy.burnTickTimer = (enemy.burnTickTimer || 0) + delta;
     enemy.curseTickTimer = (enemy.curseTickTimer || 0) + delta;
 
+    if (enemy.boss && enemy.bossAbility === "summon_beetle") {
+      enemy.summonTimer = Math.max(0, (enemy.summonTimer || enemy.summonInterval || 1) - delta);
+      if (enemy.summonTimer <= 0) {
+        spawnBeetleBossMinion(world, enemy);
+        enemy.summonTimer = enemy.summonInterval || 1;
+      }
+    }
+
     if (enemy.status.burn > 0) {
       const burnDamage = delta * enemy.status.burn * fireDotMultiplier;
       const applied = applyPeriodicDamage(enemy, burnDamage, PERIODIC_STATUS_RULES.burn.throughShield);
@@ -2998,18 +3115,33 @@ export function enemyMovementSystem(world, delta) {
     enemy.pushImpulse = Math.max(0, enemy.pushImpulse - delta * 90);
 
     if (!frozen) {
-      if (enemy.family === "worm") {
+      if (enemy.boss) {
+        enemy.bossSweepTime = (enemy.bossSweepTime || 0) + delta;
+        enemy.xOffset =
+          (enemy.bossSweepAnchorOffset || 0) +
+          zigzagWave(enemy.bossSweepTime, enemy.bossSweepPeriod || 4.8) * (enemy.bossSweepAmplitude || 0);
+      } else if (enemy.family === "worm") {
         enemy.wormZigzagTime = (enemy.wormZigzagTime || 0) + delta;
         enemy.xOffset = zigzagWave(enemy.wormZigzagTime, enemy.wormZigzagPeriod || 1.56) * (enemy.wormZigzagAmplitude || 0);
       } else {
         enemy.xOffset = 0;
       }
-      enemy.y += enemy.speed * slowMultiplier * delta;
+      const laneX = laneCenterX(layout, enemy.lane);
+      const minOffset = layout.gridX + enemy.radius - laneX;
+      const maxOffset = layout.gridX + layout.gridWidth - enemy.radius - laneX;
+      enemy.xOffset = clamp(enemy.xOffset || 0, minOffset, maxOffset);
+      const verticalSpeedScale = enemy.boss ? 0.78 : 1;
+      enemy.y += enemy.speed * verticalSpeedScale * slowMultiplier * delta;
       enemy.y -= push * delta;
       enemy.y = Math.max(layout.fieldTop + enemy.radius + layout.cell * 0.2, enemy.y);
     }
 
     if (enemy.hp <= 0) {
+      if (enemy.boss && enemy.bossAbility === "split_worm" && !enemy.splitTriggered) {
+        enemy.splitTriggered = true;
+        splitWormBoss(world, entity, enemy);
+        continue;
+      }
       run.score += enemy.reward;
       createEnemyDeathBurst(world, enemy, enemyScreenX(layout, enemy), enemy.y);
       createCoinDrop(world, enemyScreenX(layout, enemy), enemy.y - enemy.radius * 0.08, enemy.reward);

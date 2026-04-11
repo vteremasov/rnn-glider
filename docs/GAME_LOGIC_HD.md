@@ -284,9 +284,11 @@ Map rules:
 
 Boss rules:
 - The boss spawns alone.
-- The boss starts with shield equal to its HP.
-- While the boss shield is active, `slow` and `freeze` do not apply.
-- Once the shield is gone, `slow` and `freeze` may affect the boss normally.
+- Spider boss is the only boss with a personal shield equal to its HP.
+- While a boss personal shield is active, `slow` and `freeze` do not apply.
+- Beetle boss has no personal shield and summons one fast `1 HP` beetle every `1s`.
+- Worm boss has no personal shield, begins as a large butterfly-form boss, and only splits into `2` elite worms when that first form is killed.
+- Bosses now sweep side to side across the battlefield instead of falling straight down, reducing their average advance speed and making the fight read as a boss pattern rather than a normal lane push.
 
 Branch enemy themes:
 - South branch uses spider enemies.

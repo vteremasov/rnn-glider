@@ -22,7 +22,7 @@ export const ENEMY_CATALOG = [
     stats: [
       "Movement: slow downward march",
       "Branch: northeast",
-      "Profile: high HP, low speed",
+      "Profile: larger bodies, high HP, low speed",
     ],
   },
   {
@@ -60,6 +60,7 @@ export const ENEMY_CATALOG = [
     role: "elite",
     stats: [
       "Very high HP",
+      "Larger elite body",
       "Very slow",
       "Lethal on breach",
     ],
@@ -81,12 +82,14 @@ export const ENEMY_CATALOG = [
     id: "worm_boss",
     name: "Worm Boss",
     short: "Final worm-branch boss.",
-    description: "Current implementation is a huge worm boss at branch end. Roadmap already tracks replacing its behavior with a butterfly first phase that splits into elite worms.",
+    description: "The worm branch ends with a large butterfly-form boss. When that first form is fully killed, it splits into two elite worms and the fight continues against both.",
     family: "worm",
     role: "boss",
     stats: [
       "Branch end boss",
-      "Uses boss-scale HP",
+      "Butterfly first phase",
+      "Large butterfly first phase",
+      "Splits into 2 elite worms on death",
       "Pushback resistance: 0.25",
       "Shield knockback distance: 0.25 size",
     ],
@@ -95,12 +98,14 @@ export const ENEMY_CATALOG = [
     id: "beetle_boss",
     name: "Beetle Boss",
     short: "Final beetle-branch boss.",
-    description: "Current implementation is a huge armored beetle boss at branch end. Roadmap tracks its future summon-focused rework.",
+    description: "The beetle branch ends with a huge armored beetle boss that periodically spawns tiny fast beetles with 1 HP.",
     family: "beetle",
     role: "boss",
     stats: [
       "Branch end boss",
-      "Uses boss-scale HP",
+      "Summons a 1 HP fast beetle every 1s",
+      "Much larger boss body",
+      "No personal shield",
       "Pushback resistance: 0.25",
       "Shield knockback distance: 0.25 size",
     ],
@@ -115,6 +120,7 @@ export const ENEMY_CATALOG = [
     stats: [
       "Branch end boss",
       "Personal shield equals HP",
+      "Only boss with personal shield",
       "Pushback resistance: 0.25",
       "Shield knockback distance: 0.25 size",
     ],
