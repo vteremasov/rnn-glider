@@ -15,6 +15,14 @@ import { createNetworkState, triggerLegendaryOpeningVolley, updateNetwork } from
 import { LEGENDARY_PERKS } from "./catalog.js";
 
 const META_PROGRESS_KEY = "neural-bastion-meta-v1";
+const REROLL_BASE_COST = {
+  reward: 8,
+  shop: 10,
+};
+const REROLL_STEP_COST = {
+  reward: 6,
+  shop: 8,
+};
 
 function weightedChoice(rng, items) {
   const total = items.reduce((sum, item) => sum + (item.weight || 0), 0);
@@ -26,6 +34,12 @@ function weightedChoice(rng, items) {
     }
   }
   return items[0] || null;
+}
+
+function rerollCostFor(context, count) {
+  const base = REROLL_BASE_COST[context] || 8;
+  const step = REROLL_STEP_COST[context] || 6;
+  return base + step * Math.max(0, count || 0);
 }
 
 const PERIODIC_STATUS_RULES = {
@@ -84,6 +98,45 @@ function networkLayerBounds(layout) {
     top: Math.min(firstY, lastY),
     bottom: Math.max(firstY, lastY),
   };
+}
+
+function campTargetLayout(layout) {
+  const headerRect = {
+    x: layout.width * 0.08,
+    y: layout.contentTop + 52,
+    width: layout.width * 0.84,
+    height: 92,
+  };
+  const cancelRect = {
+    x: headerRect.x + headerRect.width - 116,
+    y: headerRect.y + 14,
+    width: 96,
+    height: 38,
+  };
+  const selectionPanel = {
+    x: layout.gridX - 12,
+    y: headerRect.y + headerRect.height + 18,
+    width: layout.gridWidth + 24,
+    height: Math.min(layout.contentBottom - (headerRect.y + headerRect.height + 18) - 18, 246),
+  };
+  const layerY = (layer) => {
+    const topInset = 54;
+    const bottomInset = 38;
+    const usableHeight = Math.max(120, selectionPanel.height - topInset - bottomInset);
+    if (NETWORK_LAYERS <= 1) {
+      return selectionPanel.y + topInset + usableHeight * 0.5;
+    }
+    return selectionPanel.y + topInset + (usableHeight / (NETWORK_LAYERS - 1)) * layer;
+  };
+  return { headerRect, cancelRect, selectionPanel, layerY };
+}
+
+function phaseLayerY(world, layer) {
+  const { layout, phase } = world.resources;
+  if (phase && phase.name === "camp_target") {
+    return campTargetLayout(layout).layerY(layer);
+  }
+  return networkLayerY(layout, layer);
 }
 
 function zigzagWave(time, period) {
@@ -1041,6 +1094,61 @@ function upgradeById(upgradeId) {
   return UPGRADE_LIBRARY.find((upgrade) => upgrade.id === upgradeId) || null;
 }
 
+function refreshRewardOffers(world) {
+  const ui = world.resources.ui;
+  const rewards = randomUpgrades(3, world.resources.rng, []);
+  ui.cards = rewards;
+  ui.rewardSelection = 0;
+  ui.pendingUpgrade = rewards[0]
+    ? {
+        source: ui.pendingUpgrade && ui.pendingUpgrade.source ? ui.pendingUpgrade.source : "reward",
+        upgrade: rewards[0],
+        roomType: ui.pendingUpgrade ? ui.pendingUpgrade.roomType || null : null,
+        nodeId: ui.pendingUpgrade && typeof ui.pendingUpgrade.nodeId === "number" ? ui.pendingUpgrade.nodeId : null,
+        branchCompleteAfter: !!(ui.pendingUpgrade && ui.pendingUpgrade.branchCompleteAfter),
+      }
+    : null;
+  clearDragState(ui);
+}
+
+function refreshShopOffers(world) {
+  const ui = world.resources.ui;
+  const run = world.resources.run;
+  ui.shopStock = randomUpgrades(3, world.resources.rng, []).map((upgrade, index) => ({
+    ...upgrade,
+    price: 14 + index * 8 + run.wave * 2,
+  }));
+  ui.pendingUpgrade = null;
+  clearDragState(ui);
+}
+
+function rerollUpgrades(world, context) {
+  const ui = world.resources.ui;
+  const run = world.resources.run;
+  const rerollState = ui.rerollState || { reward: 0, shop: 0 };
+  const currentCount = rerollState[context] || 0;
+  const price = rerollCostFor(context, currentCount);
+  if (run.money < price) {
+    return false;
+  }
+  run.money -= price;
+  rerollState[context] = currentCount + 1;
+  ui.rerollState = rerollState;
+  ui.rerollCost = {
+    ...(ui.rerollCost || {}),
+    [context]: rerollCostFor(context, currentCount + 1),
+  };
+  if (context === "reward") {
+    refreshRewardOffers(world);
+    return true;
+  }
+  if (context === "shop") {
+    refreshShopOffers(world);
+    return true;
+  }
+  return false;
+}
+
 function pickDebugChild(run, parent, targetDepth, branchTheme, preBossRoom) {
   const children = (parent.children || []).map((childId) => mapNodeById(run, childId)).filter(Boolean);
   if (parent.depth === 0) {
@@ -1280,6 +1388,7 @@ function openReward(world, options = {}) {
     : null;
   world.resources.ui.drag = reward
     ? {
+        armed: false,
         active: false,
         started: false,
         sourceKind: null,
@@ -1290,6 +1399,7 @@ function openReward(world, options = {}) {
         x: 0,
         y: 0,
         hoverTarget: null,
+        worldRef: world,
       }
     : null;
   world.resources.ui.rewardSelection = 0;
@@ -1300,6 +1410,14 @@ function openReward(world, options = {}) {
   world.resources.ui.legendaryDrop = null;
   world.resources.ui.neuronInspect = null;
   world.resources.ui.stagedReward = null;
+  world.resources.ui.rerollState = {
+    ...(world.resources.ui.rerollState || {}),
+    reward: 0,
+  };
+  world.resources.ui.rerollCost = {
+    ...(world.resources.ui.rerollCost || {}),
+    reward: rerollCostFor("reward", 0),
+  };
   world.resources.ui.buttons = [];
 }
 
@@ -1359,6 +1477,7 @@ function openShop(world) {
   }));
   world.resources.ui.pendingUpgrade = null;
   world.resources.ui.drag = {
+    armed: false,
     active: false,
     started: false,
     sourceKind: null,
@@ -1369,9 +1488,18 @@ function openShop(world) {
     x: 0,
     y: 0,
     hoverTarget: null,
+    worldRef: world,
   };
   world.resources.ui.legendaryDrop = null;
   world.resources.ui.neuronInspect = null;
+  world.resources.ui.rerollState = {
+    ...(world.resources.ui.rerollState || {}),
+    shop: 0,
+  };
+  world.resources.ui.rerollCost = {
+    ...(world.resources.ui.rerollCost || {}),
+    shop: rerollCostFor("shop", 0),
+  };
   world.resources.ui.buttons = [];
 }
 
@@ -1438,6 +1566,22 @@ function restoreNodeState(node, snapshot) {
   }
 }
 
+function renderNodeState(world, layer, lane) {
+  const node = world.resources.network.nodes[layer][lane];
+  const drag = world.resources.ui && world.resources.ui.drag;
+  if (
+    drag &&
+    drag.sourceKind === "node" &&
+    (drag.armed || drag.started || drag.active) &&
+    drag.sourceTarget &&
+    drag.sourceTarget.layer === layer &&
+    drag.sourceTarget.lane === lane
+  ) {
+    return createEmptyNodeState();
+  }
+  return node;
+}
+
 function nodeHasInstalledUpgrade(node) {
   return !!(node && (node.appearance || nodeStats(node) > 0));
 }
@@ -1494,6 +1638,7 @@ function nodeEditingPhase(phaseName) {
     phaseName === "shop" ||
     phaseName === "combat_finish" ||
     phaseName === "camp" ||
+    phaseName === "camp_target" ||
     phaseName === "reward_target" ||
     phaseName === "shop_target";
 }
@@ -1512,6 +1657,7 @@ function clearDragState(ui) {
   if (!ui.drag) {
     return;
   }
+  ui.drag.armed = false;
   ui.drag.active = false;
   ui.drag.started = false;
   ui.drag.sourceKind = null;
@@ -1615,10 +1761,84 @@ function commitUpgradeTarget(world, target) {
   world.resources.ui.pendingUpgrade = null;
 }
 
+function commitCampTarget(world, target) {
+  if (!target) {
+    return;
+  }
+  const network = world.resources.network;
+  const node = network.nodes[target.layer][target.lane];
+  if (!node) {
+    return;
+  }
+  node.power += 1;
+  world.resources.ui.neuronInspect = null;
+  world.resources.ui.legendaryInspect = null;
+  const layout = world.resources.layout;
+  if (layout) {
+    createFlash(
+      world,
+      laneCenterX(layout, target.lane),
+      networkLayerY(layout, target.layer),
+      COLORS.energyBright,
+      layout.cell * 0.96,
+      {
+        style: "shock",
+        accent: "rgba(246, 248, 251, 0.72)",
+        life: 0.42,
+      },
+    );
+    createDamageText(
+      world,
+      laneCenterX(layout, target.lane),
+      networkLayerY(layout, target.layer) - layout.cell * 0.52,
+      "White +1",
+      "#e7fbff",
+    );
+  }
+  world.resources.ui.pendingUpgrade = null;
+  completeMapRoom(world);
+}
+
+function skipPendingUpgrade(world) {
+  const ui = world.resources.ui;
+  const pending = ui.pendingUpgrade;
+  const source = pending && pending.source ? pending.source : "reward";
+  const roomType = pending && pending.roomType ? pending.roomType : "combat";
+  const branchCompleteAfter = !!(pending && pending.branchCompleteAfter);
+
+  ui.neuronInspect = null;
+  ui.legendaryInspect = null;
+  ui.pendingUpgrade = null;
+  clearDragState(ui);
+
+  if (source === "shop") {
+    world.resources.phase.name = "shop";
+    return;
+  }
+  if (source === "map_entry") {
+    world.resources.run.hasOpeningUpgrade = true;
+    beginWave(world, roomType);
+    return;
+  }
+  if (source === "post_combat") {
+    world.resources.run.pendingBranchComplete = branchCompleteAfter;
+    world.resources.phase.name = "combat_finish";
+    return;
+  }
+  if (world.resources.run.wave === 0) {
+    beginWave(world, "combat");
+    return;
+  }
+  world.resources.run.pendingBranchComplete = false;
+  world.resources.phase.name = "combat_finish";
+}
+
 function openCamp(world) {
-  const run = world.resources.run;
-  run.baseHp = Math.min(run.maxBaseHp, run.baseHp + 3);
   world.resources.phase.name = "camp";
+  world.resources.ui.pendingUpgrade = null;
+  world.resources.ui.legendaryDrop = null;
+  world.resources.ui.neuronInspect = null;
+  world.resources.ui.buttons = [];
 }
 
 function normalWaveEnemyCount(wave, run) {
@@ -1850,7 +2070,7 @@ function createEnemyDeathBurst(world, enemy, x, y) {
 
 function rewardDragTarget(world, pointerX, pointerY, pendingUpgrade) {
   const { layout, network } = world.resources;
-  const layerY = (layer) => networkLayerY(layout, layer);
+  const layerY = (layer) => phaseLayerY(world, layer);
   const bounds = networkLayerBounds(layout);
   const magnetRadius = layout.cell * 1.9;
   const insideNetworkBounds =
@@ -1913,7 +2133,7 @@ function rearrangeDragTarget(world, pointerX, pointerY, sourceTarget) {
         continue;
       }
       const x = laneCenterX(layout, lane);
-      const y = networkLayerY(layout, layer);
+      const y = phaseLayerY(world, layer);
       const distance = Math.hypot(pointerX - x, pointerY - y);
       if (distance < bestDistance) {
         bestDistance = distance;
@@ -1926,11 +2146,9 @@ function rearrangeDragTarget(world, pointerX, pointerY, sourceTarget) {
 }
 
 function rewardModuleRects(layout, count) {
-  const width = Math.min(layout.width * 0.84, 336);
-  const height = Math.max(112, Math.min(132, layout.cell * 3.35));
-  const gap = 10;
+  const { width, height, gap } = offerModuleMetrics(layout);
   const x = (layout.width - width) * 0.5;
-  const y = layout.contentTop + layout.cell * 0.08;
+  const y = layout.contentTop + Math.max(66, layout.cell * 1.22);
   return Array.from({ length: count }, (_, index) => ({
     x,
     y: y + index * (height + gap),
@@ -1943,7 +2161,42 @@ function rewardInlineModuleRects(layout, count) {
   return rewardModuleRects(layout, count);
 }
 
+function offerModuleMetrics(layout) {
+  return {
+    width: Math.min(layout.width * 0.84, 336),
+    height: Math.max(82, Math.min(92, layout.cell * 2.3)),
+    gap: 10,
+  };
+}
+
+function compactShopLayout(layout) {
+  return layout.width <= 520;
+}
+
+function mobileShopMetrics(layout) {
+  const rewardTop = rewardModuleRects(layout, 1)[0]?.y || (layout.contentTop + 66);
+  const toolbarY = layout.contentTop + 4;
+  const toolbarHeight = 42;
+  return {
+    toolbarY,
+    toolbarHeight,
+    cardsGapFromToolbar: Math.max(6, rewardTop - (toolbarY + toolbarHeight)),
+  };
+}
+
 function shopItemRects(layout, count) {
+  if (compactShopLayout(layout)) {
+    const metrics = mobileShopMetrics(layout);
+    const { width, height, gap } = offerModuleMetrics(layout);
+    const x = (layout.width - width) * 0.5;
+    const y = metrics.toolbarY + metrics.toolbarHeight + metrics.cardsGapFromToolbar;
+    return Array.from({ length: count }, (_, index) => ({
+      x,
+      y: y + index * (height + gap),
+      width,
+      height,
+    }));
+  }
   const gap = 14;
   const totalGap = gap * (count - 1);
   const width = Math.min(220, (layout.width - 36 - totalGap) / count);
@@ -1959,6 +2212,41 @@ function shopItemRects(layout, count) {
 
 function shopControlRects(layout, count) {
   const cards = shopItemRects(layout, count);
+  if (compactShopLayout(layout)) {
+    const metrics = mobileShopMetrics(layout);
+    const width = 96;
+    const height = 42;
+    const gap = 10;
+    const totalWidth = width * 3 + gap * 2;
+    const startX = (layout.width - totalWidth) * 0.5;
+    const y = metrics.toolbarY;
+    return {
+      repair: {
+        x: startX,
+        y,
+        width,
+        height,
+      },
+      cancel: {
+        x: startX + width + gap,
+        y,
+        width,
+        height,
+      },
+      reroll: {
+        x: startX + width + gap,
+        y,
+        width,
+        height,
+      },
+      leave: {
+        x: startX + (width + gap) * 2,
+        y,
+        width,
+        height,
+      },
+    };
+  }
   const controlY = Math.max(layout.contentTop + 8, (cards[0]?.y || layout.height * 0.19) - 66);
   return {
     repair: {
@@ -1968,6 +2256,12 @@ function shopControlRects(layout, count) {
       height: 56,
     },
     cancel: {
+      x: layout.width / 2 - 78,
+      y: controlY,
+      width: 156,
+      height: 56,
+    },
+    reroll: {
       x: layout.width / 2 - 78,
       y: controlY,
       width: 156,
@@ -2088,7 +2382,7 @@ function neuronAtPointer(world) {
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       const x = laneCenterX(layout, lane);
-      const y = networkLayerY(layout, layer);
+      const y = phaseLayerY(world, layer);
       const distance = Math.hypot(pointer.x - x, pointer.y - y);
       if (distance <= layout.cell * 0.95) {
         return { layer, lane, x, y };
@@ -2175,7 +2469,8 @@ export function inputSystem(world) {
         if (hit) {
           const node = network.nodes[hit.layer][hit.lane];
           if (nodeHasInstalledUpgrade(node)) {
-            ui.drag.started = true;
+            ui.drag.armed = true;
+            ui.drag.started = false;
             ui.drag.sourceKind = "node";
             ui.drag.sourceTarget = { layer: hit.layer, lane: hit.lane, x: hit.x, y: hit.y };
             ui.drag.sourceNode = cloneNodeState(node);
@@ -2189,9 +2484,11 @@ export function inputSystem(world) {
       }
     }
 
-    if (pointer.down && ui.drag.started && !ui.drag.active && ui.drag.sourceKind === "node") {
+    if (pointer.down && (ui.drag.armed || ui.drag.started) && !ui.drag.active && ui.drag.sourceKind === "node") {
       const dragDistance = Math.hypot(pointer.x - ui.drag.startX, pointer.y - ui.drag.startY);
-      if (dragDistance > Math.max(8, layout.cell * 0.24)) {
+      if (dragDistance > Math.max(5, layout.cell * 0.14)) {
+        ui.drag.armed = false;
+        ui.drag.started = true;
         ui.drag.active = true;
       }
     }
@@ -2208,8 +2505,9 @@ export function inputSystem(world) {
       ui.drag.hoverTarget = hover;
     }
 
-    if (pointer.justReleased && ui.drag.sourceKind === "node" && (ui.drag.started || ui.drag.active)) {
-      const didMove = ui.drag.active;
+    if (pointer.justReleased && ui.drag.sourceKind === "node" && (ui.drag.armed || ui.drag.started || ui.drag.active)) {
+      const dragDistance = Math.hypot(pointer.x - ui.drag.startX, pointer.y - ui.drag.startY);
+      const didMove = ui.drag.active || dragDistance > Math.max(5, layout.cell * 0.14);
       if (ui.drag.active && ui.drag.hoverTarget) {
         commitNodeReorder(world, ui.drag.sourceTarget, ui.drag.hoverTarget.target);
         pointer.justReleased = false;
@@ -2234,6 +2532,33 @@ export function inputSystem(world) {
         ui.pendingUpgrade = null;
       }
       clearDragState(ui);
+    }
+    if (!ui.drag.active && !ui.drag.started && pointer.justReleased) {
+      const toolbarHit = ui.buttons.find((button) => {
+        return (
+          pointer.x >= button.x &&
+          pointer.x <= button.x + button.width &&
+          pointer.y >= button.y &&
+          pointer.y <= button.y + button.height
+        );
+      });
+      if (toolbarHit) {
+        if (phase.name === "reward_drag" && toolbarHit.action === "leave_reward") {
+          pointer.justReleased = false;
+          skipPendingUpgrade(world);
+          return;
+        }
+        if (phase.name === "reward_drag" && toolbarHit.action === "reroll_reward") {
+          pointer.justReleased = false;
+          rerollUpgrades(world, "reward");
+          return;
+        }
+        if (phase.name === "shop" && toolbarHit.action === "reroll_shop") {
+          pointer.justReleased = false;
+          rerollUpgrades(world, "shop");
+          return;
+        }
+      }
     }
     if (isRewardDrag || ui.drag.active || ui.drag.started || ui.pendingUpgrade) {
       if (!ui.drag.active && !ui.drag.started && pointer.justReleased && inspectablePhase(phase.name)) {
@@ -2326,6 +2651,17 @@ export function inputSystem(world) {
     return;
   }
 
+  if (phase.name === "reward_drag") {
+    if (hit.action === "leave_reward") {
+      skipPendingUpgrade(world);
+      return;
+    }
+    if (hit.action === "reroll_reward") {
+      rerollUpgrades(world, "reward");
+    }
+    return;
+  }
+
   if (phase.name === "doors") {
     if (hit.roomType === "shop") {
       openShop(world);
@@ -2342,6 +2678,10 @@ export function inputSystem(world) {
   if (phase.name === "shop") {
     if (hit.action === "leave") {
       completeMapRoom(world);
+      return;
+    }
+    if (hit.action === "reroll_shop") {
+      rerollUpgrades(world, "shop");
       return;
     }
     if (hit.action === "repair" && world.resources.run.money >= 12) {
@@ -2364,7 +2704,26 @@ export function inputSystem(world) {
   }
 
   if (phase.name === "camp") {
-    completeMapRoom(world);
+    if (hit.action === "camp_heal") {
+      world.resources.run.baseHp = Math.min(world.resources.run.maxBaseHp, world.resources.run.baseHp + 3);
+      completeMapRoom(world);
+      return;
+    }
+    if (hit.action === "camp_upgrade") {
+      world.resources.phase.name = "camp_target";
+      return;
+    }
+    return;
+  }
+
+  if (phase.name === "camp_target") {
+    if (hit.action === "cancel_camp_target") {
+      world.resources.phase.name = "camp";
+      return;
+    }
+    if (hit.target) {
+      commitCampTarget(world, hit.target);
+    }
     return;
   }
 
@@ -2973,6 +3332,143 @@ function drawButton(ctx, button, active = false) {
   ctx.moveTo(button.x + 12, button.y + button.height - 10);
   ctx.lineTo(button.x + button.width - 12, button.y + button.height - 10);
   ctx.stroke();
+}
+
+function drawPillButton(ctx, button, active = false) {
+  ctx.fillStyle = active ? "rgba(28, 34, 42, 0.96)" : "rgba(20, 25, 32, 0.9)";
+  pathRoundedRect(ctx, button.x, button.y, button.width, button.height, 16);
+  ctx.fill();
+  ctx.strokeStyle = active ? "rgba(246,248,251,0.34)" : "rgba(246,248,251,0.12)";
+  ctx.lineWidth = active ? 1.6 : 1.1;
+  pathRoundedRect(ctx, button.x, button.y, button.width, button.height, 16);
+  ctx.stroke();
+}
+
+function drawCampChoiceCard(ctx, rect, title, subtitle, accent, icon) {
+  ctx.fillStyle = "rgba(8, 12, 18, 0.28)";
+  pathRoundedRect(ctx, rect.x, rect.y + 4, rect.width, rect.height, 18);
+  ctx.fill();
+
+  const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.height);
+  fill.addColorStop(0, "rgba(36, 43, 52, 0.98)");
+  fill.addColorStop(1, "rgba(24, 29, 36, 0.98)");
+  ctx.fillStyle = fill;
+  pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 18);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(246,248,251,0.14)";
+  ctx.lineWidth = 1.2;
+  pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 18);
+  ctx.stroke();
+
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2.1;
+  pathRoundedRect(ctx, rect.x + 1.5, rect.y + 1.5, rect.width - 3, rect.height - 3, 16);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  pathRoundedRect(ctx, rect.x + 14, rect.y + 12, 52, 52, 16);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(246,248,251,0.1)";
+  ctx.lineWidth = 1;
+  pathRoundedRect(ctx, rect.x + 14, rect.y + 12, 52, 52, 16);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(rect.x + 40, rect.y + rect.height * 0.5);
+  if (icon === "heal") {
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(8, 0);
+    ctx.moveTo(0, -8);
+    ctx.lineTo(0, 8);
+    ctx.stroke();
+  } else {
+    drawUpgradePreview(ctx, { id: "overdrive", color: accent, icon: "+", shape: "hex", level: 1 }, 0, 0, 18);
+  }
+  ctx.restore();
+
+  drawText(ctx, title, rect.x + 78, rect.y + 28, 20, COLORS.text);
+  drawText(ctx, subtitle, rect.x + 78, rect.y + 52, 14, accent);
+}
+
+function drawOfferModuleCard(ctx, rect, upgrade, options = {}) {
+  const selected = options.selected === true;
+  const price = typeof options.price === "number" ? options.price : null;
+  const sold = options.sold === true;
+  const showDescription = options.showDescription !== false;
+  const accent = sold ? "rgba(168,178,194,0.34)" : selected ? "rgba(246,248,251,0.34)" : "rgba(246,248,251,0.14)";
+  const surfaceTop = selected ? "rgba(30, 36, 44, 0.96)" : "rgba(24, 29, 36, 0.94)";
+  const surfaceBottom = selected ? "rgba(21, 26, 33, 0.98)" : "rgba(18, 22, 28, 0.96)";
+  const titleColor = sold ? COLORS.textDim : COLORS.text;
+  const shortColor = sold ? "rgba(168,178,194,0.74)" : COLORS.textDim;
+  const iconAlpha = sold ? 0.48 : 1;
+  const textX = rect.x + 76;
+  const textWidth = rect.width - 92;
+
+  ctx.fillStyle = "rgba(8, 12, 18, 0.26)";
+  pathRoundedRect(ctx, rect.x, rect.y + 3, rect.width, rect.height, 18);
+  ctx.fill();
+
+  const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.height);
+  fill.addColorStop(0, surfaceTop);
+  fill.addColorStop(1, surfaceBottom);
+  ctx.fillStyle = fill;
+  pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 18);
+  ctx.fill();
+
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = selected ? 1.6 : 1.15;
+  pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 18);
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255,255,255,0.04)";
+  pathRoundedRect(ctx, rect.x + 14, rect.y + rect.height * 0.5 - 24, 48, 48, 14);
+  ctx.fill();
+  ctx.strokeStyle = selected ? "rgba(246,248,251,0.14)" : "rgba(246,248,251,0.08)";
+  ctx.lineWidth = 1;
+  pathRoundedRect(ctx, rect.x + 14, rect.y + rect.height * 0.5 - 24, 48, 48, 14);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(rect.x + 38, rect.y + rect.height * 0.5);
+  ctx.globalAlpha = iconAlpha;
+  drawUpgradePreview(ctx, upgrade, 0, 0, 20);
+  ctx.restore();
+
+  const titleY = rect.y + 18;
+  const titleCount = drawWrappedTextBlock(ctx, upgrade.name, textX, titleY, 13, titleColor, textWidth, 15, 2);
+  const shortY = titleY + titleCount * 15 + 4;
+  const shortCount = drawWrappedTextBlock(
+    ctx,
+    upgrade.short || upgrade.description,
+    textX,
+    shortY,
+    10,
+    shortColor,
+    textWidth,
+    12,
+    showDescription ? 2 : 3,
+  );
+
+  if (showDescription) {
+    const descY = shortY + shortCount * 12 + 6;
+    drawWrappedTextBlock(ctx, upgrade.description, textX, descY, 10, shortColor, textWidth, 12, 2);
+  }
+
+  if (price !== null) {
+    drawText(
+      ctx,
+      sold ? "Sold" : `$${price}`,
+      textX,
+      rect.y + rect.height - 14,
+      15,
+      sold ? COLORS.textDim : COLORS.warning,
+    );
+  }
 }
 
 function drawSwordIcon(ctx, x, y, scale, color, rotation = -0.78) {
@@ -4108,6 +4604,7 @@ function drawNodeDragTargets(ctx, layout, network, drag) {
   if (!(drag && drag.sourceKind === "node" && drag.active)) {
     return;
   }
+  const world = drag.worldRef;
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       const sourceTarget = drag.sourceTarget;
@@ -4123,7 +4620,7 @@ function drawNodeDragTargets(ctx, layout, network, drag) {
         continue;
       }
       const x = laneCenterX(layout, lane);
-      const y = networkLayerY(layout, layer);
+      const y = world ? phaseLayerY(world, layer) : networkLayerY(layout, layer);
       const hover = drag.hoverTarget && drag.hoverTarget.target.layer === layer && drag.hoverTarget.target.lane === lane;
       const merge = nodeHasInstalledUpgrade(targetNode) && canMergeNodeSnapshots(drag.sourceNode, cloneNodeState(targetNode));
       ctx.strokeStyle = hover
@@ -4246,6 +4743,10 @@ function shieldSurfaceY(layout, x) {
 
 function drawCombatScene(world, ctx) {
   const { layout, run, network, turret } = world.resources;
+  const phaseName = world.resources.phase.name;
+  const calmOverlay = world.resources.phase.name === "camp" || world.resources.phase.name === "camp_target";
+  const compactSelectionOverlay = world.resources.phase.name === "camp_target";
+  const quietBackdrop = calmOverlay;
   const uiScale = layout.cell;
   const layerY = (layer) => networkLayerY(layout, layer);
   const activeLane = typeof network.activeInputLane === "number" ? network.activeInputLane : -1;
@@ -4309,6 +4810,9 @@ function drawCombatScene(world, ctx) {
     ctx.stroke();
   }
   for (let row = 0; row <= GRID_ROWS; row += 1) {
+    if (quietBackdrop) {
+      continue;
+    }
     const y = layout.contentTop + (layout.contentHeight / GRID_ROWS) * row;
     ctx.globalAlpha = row % 4 === 0 ? 0.16 : 0.07;
     ctx.beginPath();
@@ -4318,7 +4822,7 @@ function drawCombatScene(world, ctx) {
   }
   ctx.globalAlpha = 1;
 
-  if ((run.shield || 0) > 0 || (run.shieldVisual || 0) > 0.01) {
+  if (!quietBackdrop && ((run.shield || 0) > 0 || (run.shieldVisual || 0) > 0.01)) {
     const { shieldY, shieldInset, domeHeight, rimY, highlightY, shieldCx, shieldRx, shieldRy } = shieldGeometry(layout);
     const shieldAppear = smoothStep(run.shieldVisual || 0);
     const pulse = run.shieldAppearPulse || 0;
@@ -4363,297 +4867,300 @@ function drawCombatScene(world, ctx) {
     ctx.stroke();
   }
 
-  ctx.fillStyle = "#352f38";
-  ctx.fillRect(layout.gridX, layout.baseLineY, layout.gridWidth, uiScale * 0.45);
-
-  const packetShots = network.pendingShot ? network.pendingShot.shots || [] : [];
-  const currentPacketShot =
-    network.pendingShot && network.outputChargeIndex < packetShots.length
-      ? packetShots[network.outputChargeIndex]
-      : null;
-  const arrivedPacketLanes = new Set();
-  for (let shotIndex = 0; shotIndex < Math.min(network.outputChargeIndex || 0, packetShots.length); shotIndex += 1) {
-    arrivedPacketLanes.add(packetShots[shotIndex].lane);
+  if (!quietBackdrop) {
+    ctx.fillStyle = "#352f38";
+    ctx.fillRect(layout.gridX, layout.baseLineY, layout.gridWidth, uiScale * 0.45);
   }
 
-  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-    const x = laneCenterX(layout, lane);
-    const outputY = layerY(NETWORK_LAYERS - 1);
-    const activeOutputs = network.pendingShot ? network.pendingShot.outputs || [] : [];
-    const isInPacket = activeOutputs.indexOf(lane) !== -1;
-    const isCurrentCharge = !!(currentPacketShot && currentPacketShot.lane === lane);
-    const isArrived = arrivedPacketLanes.has(lane);
-    const previewCharge = !network.pendingShot ? clamp((renderGrid[NETWORK_LAYERS - 1][lane] || 0) / 3.2, 0, 1) : 0;
-    const towerCharge = network.pendingShot
-      ? isInPacket
-        ? 0.56
-        : isArrived
-          ? 0.34
-          : 0
-      : previewCharge * 0.82;
-    const linkAlpha = network.pendingShot
-      ? isInPacket
-        ? 0.34
-        : isArrived
-          ? 0.22
-          : 0
-      : 0.06 + previewCharge * 0.18;
-    const linkWidth = network.pendingShot
-      ? isInPacket
-        ? Math.max(2.3, uiScale * 0.15)
-        : isArrived
-          ? Math.max(1.8, uiScale * 0.12)
-          : 0
-      : 1 + previewCharge * Math.max(1.2, uiScale * 0.08);
-    const turretBend = (layout.turretX - x) * 0.14;
-    drawLinkCurve(ctx, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, linkWidth, `rgba(89,245,214,${linkAlpha})`, turretBend);
-    if (isCurrentCharge || isArrived || previewCharge > 0.02) {
-      const turretPathProgress = network.pendingShot
-        ? (isCurrentCharge || isArrived || isInPacket ? 1 : 0)
-        : segmentTravelProgress(previewCharge, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, segmentReference);
-      drawEnergySegment(
-        ctx,
-        x,
-        outputY + layout.cell * 0.14,
-        layout.turretX,
-        layout.turretY - layout.cell * 0.2,
-        turretPathProgress,
-        network.pendingShot
-          ? isInPacket
-            ? Math.max(2.8, uiScale * 0.19)
-            : Math.max(2.0, uiScale * 0.14)
-          : Math.max(2.0, uiScale * 0.14),
-        network.pendingShot
-          ? isInPacket
-            ? 0.56
-            : isArrived
-              ? 0.26
-              : 0
-          : 0.42,
-        turretBend,
-      );
+  if (!compactSelectionOverlay) {
+    const packetShots = network.pendingShot ? network.pendingShot.shots || [] : [];
+    const currentPacketShot =
+      network.pendingShot && network.outputChargeIndex < packetShots.length
+        ? packetShots[network.outputChargeIndex]
+        : null;
+    const arrivedPacketLanes = new Set();
+    for (let shotIndex = 0; shotIndex < Math.min(network.outputChargeIndex || 0, packetShots.length); shotIndex += 1) {
+      arrivedPacketLanes.add(packetShots[shotIndex].lane);
     }
-  }
 
-  const turretChargeRaw = computeTurretChargeProgress(network);
-  const turretCharge = clamp(Math.max(0.08, turret.chargeVisual || turretChargeRaw), 0.08, 1);
-  const turretChargePhase = turret.chargeCycle || 0;
-  const turretChargeWave = Math.sin(turretChargePhase) * 0.5 + 0.5;
-  const turretBurst = turret.chargeBurst || 0;
-  const turretCoreFlash = turret.coreFlash || 0;
-  const turretMuzzleFlash = turret.muzzleFlash || 0;
-  const turretRecoil = turret.recoil || 0;
-  const turretBaseW = layout.cell * 2.6;
-  const turretBaseH = layout.cell * 0.42;
-  const turretHeadW = layout.cell * 1.48;
-  const turretHeadH = layout.cell * 1.02;
-  const barrelLength = layout.cell * (1.06 - turretRecoil * 0.08);
-  const barrelWidth = Math.max(4, layout.cell * 0.18);
-  const barrelStartOffset = layout.cell * (0.46 - turretRecoil * 0.1);
-  const barrelStartX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelStartOffset;
-  const barrelStartY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelStartOffset;
-  const barrelX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelLength;
-  const barrelY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelLength;
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const x = laneCenterX(layout, lane);
+      const outputY = layerY(NETWORK_LAYERS - 1);
+      const activeOutputs = network.pendingShot ? network.pendingShot.outputs || [] : [];
+      const isInPacket = activeOutputs.indexOf(lane) !== -1;
+      const isCurrentCharge = !!(currentPacketShot && currentPacketShot.lane === lane);
+      const isArrived = arrivedPacketLanes.has(lane);
+      const previewCharge = !network.pendingShot ? clamp((renderGrid[NETWORK_LAYERS - 1][lane] || 0) / 3.2, 0, 1) : 0;
+      const towerCharge = network.pendingShot
+        ? isInPacket
+          ? 0.56
+          : isArrived
+            ? 0.34
+            : 0
+        : previewCharge * 0.82;
+      const linkAlpha = network.pendingShot
+        ? isInPacket
+          ? 0.34
+          : isArrived
+            ? 0.22
+            : 0
+        : 0.06 + previewCharge * 0.18;
+      const linkWidth = network.pendingShot
+        ? isInPacket
+          ? Math.max(2.3, uiScale * 0.15)
+          : isArrived
+            ? Math.max(1.8, uiScale * 0.12)
+            : 0
+        : 1 + previewCharge * Math.max(1.2, uiScale * 0.08);
+      const turretBend = (layout.turretX - x) * 0.14;
+      drawLinkCurve(ctx, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, linkWidth, `rgba(89,245,214,${linkAlpha})`, turretBend);
+      if (isCurrentCharge || isArrived || previewCharge > 0.02) {
+        const turretPathProgress = network.pendingShot
+          ? (isCurrentCharge || isArrived || isInPacket ? 1 : 0)
+          : segmentTravelProgress(previewCharge, x, outputY + layout.cell * 0.14, layout.turretX, layout.turretY - layout.cell * 0.2, segmentReference);
+        drawEnergySegment(
+          ctx,
+          x,
+          outputY + layout.cell * 0.14,
+          layout.turretX,
+          layout.turretY - layout.cell * 0.2,
+          turretPathProgress,
+          network.pendingShot
+            ? isInPacket
+              ? Math.max(2.8, uiScale * 0.19)
+              : Math.max(2.0, uiScale * 0.14)
+            : Math.max(2.0, uiScale * 0.14),
+          network.pendingShot
+            ? isInPacket
+              ? 0.56
+              : isArrived
+                ? 0.26
+                : 0
+            : 0.42,
+          turretBend,
+        );
+      }
+    }
 
-  ctx.fillStyle = "rgba(7, 10, 14, 0.3)";
-  ctx.beginPath();
-  ctx.ellipse(layout.turretX, layout.turretY + layout.cell * 0.9, layout.cell * 1.25, layout.cell * 0.34, 0, 0, Math.PI * 2);
-  ctx.fill();
+    const turretChargeRaw = computeTurretChargeProgress(network);
+    const turretCharge = clamp(Math.max(0.08, turret.chargeVisual || turretChargeRaw), 0.08, 1);
+    const turretChargePhase = turret.chargeCycle || 0;
+    const turretChargeWave = Math.sin(turretChargePhase) * 0.5 + 0.5;
+    const turretBurst = turret.chargeBurst || 0;
+    const turretCoreFlash = turret.coreFlash || 0;
+    const turretMuzzleFlash = turret.muzzleFlash || 0;
+    const turretRecoil = turret.recoil || 0;
+    const turretBaseW = layout.cell * 2.6;
+    const turretBaseH = layout.cell * 0.42;
+    const turretHeadW = layout.cell * 1.48;
+    const turretHeadH = layout.cell * 1.02;
+    const barrelLength = layout.cell * (1.06 - turretRecoil * 0.08);
+    const barrelWidth = Math.max(4, layout.cell * 0.18);
+    const barrelStartOffset = layout.cell * (0.46 - turretRecoil * 0.1);
+    const barrelStartX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelStartOffset;
+    const barrelStartY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelStartOffset;
+    const barrelX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelLength;
+    const barrelY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelLength;
 
-  ctx.fillStyle = "#f2e8c9";
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.42,
-    layout.turretY + layout.cell * 0.52,
-    turretBaseW * 0.84,
-    turretBaseH,
-    layout.cell * 0.08,
-  );
-  ctx.fill();
-
-  ctx.fillStyle = "#15283d";
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.5,
-    layout.turretY + layout.cell * 0.26,
-    turretBaseW,
-    turretBaseH * 1.08,
-    layout.cell * 0.14,
-  );
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.05)";
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.42,
-    layout.turretY + layout.cell * 0.3,
-    turretBaseW * 0.84,
-    turretBaseH * 0.36,
-    layout.cell * 0.08,
-  );
-  ctx.fill();
-  ctx.strokeStyle = "rgba(137, 218, 255, 0.4)";
-  ctx.lineWidth = 1.8;
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.5,
-    layout.turretY + layout.cell * 0.26,
-    turretBaseW,
-    turretBaseH * 1.08,
-    layout.cell * 0.14,
-  );
-  ctx.stroke();
-
-  ctx.fillStyle = "rgba(216,191,132,0.14)";
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.46,
-    layout.turretY + layout.cell * 0.36,
-    turretBaseW * 0.92,
-    layout.cell * 0.18,
-    layout.cell * 0.08,
-  );
-  ctx.fill();
-  ctx.fillStyle = `rgba(216,191,132,${0.34 + turretCharge * 0.42})`;
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.46,
-    layout.turretY + layout.cell * 0.36,
-    turretBaseW * 0.92 * turretCharge,
-    layout.cell * 0.18,
-    layout.cell * 0.08,
-  );
-  ctx.fill();
-  ctx.fillStyle = `rgba(143,216,255,${0.12 + turretCharge * 0.1 + turretChargeWave * 0.06 + turretBurst * 0.1})`;
-  pathRoundedRect(
-    ctx,
-    layout.turretX - turretBaseW * 0.44,
-    layout.turretY + layout.cell * 0.34,
-    turretBaseW * 0.88 * clamp(turretCharge * 0.72 + turretBurst * 0.14, 0, 1),
-    layout.cell * 0.08,
-    layout.cell * 0.05,
-  );
-  ctx.fill();
-
-  ctx.save();
-  ctx.translate(layout.turretX, layout.turretY - layout.cell * 0.02);
-  ctx.rotate(world.resources.turret.angle);
-
-  ctx.fillStyle = "rgba(216,191,132,0.14)";
-  ctx.beginPath();
-  ctx.ellipse(0, 0, turretHeadW * 0.56, turretHeadH * 0.64, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = "#102235";
-  pathRoundedRect(ctx, -turretHeadW * 0.5, -turretHeadH * 0.42, turretHeadW, turretHeadH * 0.84, layout.cell * 0.22);
-  ctx.fill();
-  ctx.fillStyle = "rgba(255,255,255,0.05)";
-  pathRoundedRect(ctx, -turretHeadW * 0.38, -turretHeadH * 0.36, turretHeadW * 0.76, turretHeadH * 0.24, layout.cell * 0.12);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(151, 219, 255, 0.54)";
-  ctx.lineWidth = 2;
-  pathRoundedRect(ctx, -turretHeadW * 0.5, -turretHeadH * 0.42, turretHeadW, turretHeadH * 0.84, layout.cell * 0.22);
-  ctx.stroke();
-
-  ctx.fillStyle = "#213a57";
-  pathRoundedRect(ctx, -turretHeadW * 0.3, -turretHeadH * 0.6, turretHeadW * 0.6, turretHeadH * 0.24, layout.cell * 0.1);
-  ctx.fill();
-
-  ctx.fillStyle = `rgba(216,191,132,${0.26 + turretCharge * 0.42})`;
-  ctx.beginPath();
-  ctx.arc(0, 0, layout.cell * 0.19 + turretCharge * layout.cell * 0.05, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = `rgba(143,216,255,${0.1 + turretCharge * 0.24 + turretCoreFlash * 0.2})`;
-  ctx.lineWidth = Math.max(1.2, layout.cell * 0.06);
-  ctx.beginPath();
-  ctx.arc(0, 0, layout.cell * (0.34 + turretCharge * 0.06), -Math.PI * 0.68 + turretChargePhase * 0.18, Math.PI * 0.18 + turretChargePhase * 0.18);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(0, 0, layout.cell * (0.42 + turretCharge * 0.08), Math.PI * 0.22 - turretChargePhase * 0.14, Math.PI * 0.94 - turretChargePhase * 0.14);
-  ctx.stroke();
-  ctx.strokeStyle = COLORS.energyBright;
-  ctx.lineWidth = 1.6;
-  ctx.beginPath();
-  ctx.arc(0, 0, layout.cell * 0.27, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = "#1c3148";
-  pathRoundedRect(ctx, -turretHeadW * 0.72, -layout.cell * 0.14, layout.cell * 0.28, layout.cell * 0.24, layout.cell * 0.08);
-  ctx.fill();
-  pathRoundedRect(ctx, turretHeadW * 0.44, -layout.cell * 0.14, layout.cell * 0.28, layout.cell * 0.24, layout.cell * 0.08);
-  ctx.fill();
-
-  ctx.strokeStyle = "#e9fbff";
-  ctx.lineWidth = barrelWidth;
-  ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(layout.cell * 0.2, 0);
-  ctx.lineTo(barrelLength, 0);
-  ctx.stroke();
-
-  ctx.strokeStyle = "rgba(89,245,214,0.42)";
-  ctx.lineWidth = Math.max(2, barrelWidth * 0.44);
-  ctx.beginPath();
-  ctx.moveTo(layout.cell * 0.25, 0);
-  ctx.lineTo(barrelLength, 0);
-  ctx.stroke();
-  ctx.strokeStyle = `rgba(143,216,255,${0.08 + turretCharge * 0.28 + turretBurst * 0.18})`;
-  ctx.lineWidth = Math.max(1.4, barrelWidth * 0.24);
-  ctx.beginPath();
-  ctx.moveTo(layout.cell * 0.24, 0);
-  ctx.lineTo(barrelLength, 0);
-  ctx.stroke();
-  if (turretCharge > 0.12 || turretMuzzleFlash > 0.01) {
-    const muzzleGlow = 0.12 + turretCharge * 0.22 + turretMuzzleFlash * 0.54;
-    ctx.fillStyle = `rgba(143,216,255,${muzzleGlow})`;
+    ctx.fillStyle = "rgba(7, 10, 14, 0.3)";
     ctx.beginPath();
-    ctx.ellipse(
-      barrelLength + layout.cell * 0.05,
-      0,
-      layout.cell * (0.08 + turretCharge * 0.08 + turretMuzzleFlash * 0.12),
-      layout.cell * (0.14 + turretCharge * 0.06 + turretMuzzleFlash * 0.12),
-      0,
-      0,
-      Math.PI * 2,
+    ctx.ellipse(layout.turretX, layout.turretY + layout.cell * 0.9, layout.cell * 1.25, layout.cell * 0.34, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#f2e8c9";
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.42,
+      layout.turretY + layout.cell * 0.52,
+      turretBaseW * 0.84,
+      turretBaseH,
+      layout.cell * 0.08,
     );
     ctx.fill();
-  }
 
-  ctx.fillStyle = "#13283f";
-  pathRoundedRect(ctx, layout.cell * 0.06, -layout.cell * 0.12, layout.cell * 0.44, layout.cell * 0.24, layout.cell * 0.08);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(140, 214, 255, 0.48)";
-  ctx.lineWidth = 1.3;
-  pathRoundedRect(ctx, layout.cell * 0.06, -layout.cell * 0.12, layout.cell * 0.44, layout.cell * 0.24, layout.cell * 0.08);
-  ctx.stroke();
-
-  ctx.restore();
-
-  ctx.fillStyle = `rgba(143,216,255,${0.08 + turretCharge * 0.12 + turretBurst * 0.1})`;
-  ctx.beginPath();
-  ctx.arc(barrelStartX, barrelStartY, layout.cell * (0.09 + turretCharge * 0.03), 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.fillStyle = `rgba(216,191,132,${0.18 + turretCharge * 0.26 + turretBurst * 0.12})`;
-  ctx.beginPath();
-  ctx.arc(barrelX, barrelY, layout.cell * (0.11 + turretMuzzleFlash * 0.04), 0, Math.PI * 2);
-  ctx.fill();
-  if (turretCharge > 0.08 || turretBurst > 0.01) {
-    ctx.strokeStyle = `rgba(143,216,255,${0.1 + turretCharge * 0.16 + turretBurst * 0.2})`;
-    ctx.lineWidth = Math.max(1.4, layout.cell * 0.06);
-    ctx.beginPath();
-    ctx.arc(layout.turretX, layout.turretY - layout.cell * 0.02, layout.cell * (0.62 + turretChargeWave * 0.04), -Math.PI * 0.84, -Math.PI * 0.18);
+    ctx.fillStyle = "#15283d";
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.5,
+      layout.turretY + layout.cell * 0.26,
+      turretBaseW,
+      turretBaseH * 1.08,
+      layout.cell * 0.14,
+    );
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.42,
+      layout.turretY + layout.cell * 0.3,
+      turretBaseW * 0.84,
+      turretBaseH * 0.36,
+      layout.cell * 0.08,
+    );
+    ctx.fill();
+    ctx.strokeStyle = "rgba(137, 218, 255, 0.4)";
+    ctx.lineWidth = 1.8;
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.5,
+      layout.turretY + layout.cell * 0.26,
+      turretBaseW,
+      turretBaseH * 1.08,
+      layout.cell * 0.14,
+    );
     ctx.stroke();
-  }
 
-  for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
-    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+    ctx.fillStyle = "rgba(216,191,132,0.14)";
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.46,
+      layout.turretY + layout.cell * 0.36,
+      turretBaseW * 0.92,
+      layout.cell * 0.18,
+      layout.cell * 0.08,
+    );
+    ctx.fill();
+    ctx.fillStyle = `rgba(216,191,132,${0.34 + turretCharge * 0.42})`;
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.46,
+      layout.turretY + layout.cell * 0.36,
+      turretBaseW * 0.92 * turretCharge,
+      layout.cell * 0.18,
+      layout.cell * 0.08,
+    );
+    ctx.fill();
+    ctx.fillStyle = `rgba(143,216,255,${0.12 + turretCharge * 0.1 + turretChargeWave * 0.06 + turretBurst * 0.1})`;
+    pathRoundedRect(
+      ctx,
+      layout.turretX - turretBaseW * 0.44,
+      layout.turretY + layout.cell * 0.34,
+      turretBaseW * 0.88 * clamp(turretCharge * 0.72 + turretBurst * 0.14, 0, 1),
+      layout.cell * 0.08,
+      layout.cell * 0.05,
+    );
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(layout.turretX, layout.turretY - layout.cell * 0.02);
+    ctx.rotate(world.resources.turret.angle);
+
+    ctx.fillStyle = "rgba(216,191,132,0.14)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, turretHeadW * 0.56, turretHeadH * 0.64, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#102235";
+    pathRoundedRect(ctx, -turretHeadW * 0.5, -turretHeadH * 0.42, turretHeadW, turretHeadH * 0.84, layout.cell * 0.22);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.05)";
+    pathRoundedRect(ctx, -turretHeadW * 0.38, -turretHeadH * 0.36, turretHeadW * 0.76, turretHeadH * 0.24, layout.cell * 0.12);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(151, 219, 255, 0.54)";
+    ctx.lineWidth = 2;
+    pathRoundedRect(ctx, -turretHeadW * 0.5, -turretHeadH * 0.42, turretHeadW, turretHeadH * 0.84, layout.cell * 0.22);
+    ctx.stroke();
+
+    ctx.fillStyle = "#213a57";
+    pathRoundedRect(ctx, -turretHeadW * 0.3, -turretHeadH * 0.6, turretHeadW * 0.6, turretHeadH * 0.24, layout.cell * 0.1);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(216,191,132,${0.26 + turretCharge * 0.42})`;
+    ctx.beginPath();
+    ctx.arc(0, 0, layout.cell * 0.19 + turretCharge * layout.cell * 0.05, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(143,216,255,${0.1 + turretCharge * 0.24 + turretCoreFlash * 0.2})`;
+    ctx.lineWidth = Math.max(1.2, layout.cell * 0.06);
+    ctx.beginPath();
+    ctx.arc(0, 0, layout.cell * (0.34 + turretCharge * 0.06), -Math.PI * 0.68 + turretChargePhase * 0.18, Math.PI * 0.18 + turretChargePhase * 0.18);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(0, 0, layout.cell * (0.42 + turretCharge * 0.08), Math.PI * 0.22 - turretChargePhase * 0.14, Math.PI * 0.94 - turretChargePhase * 0.14);
+    ctx.stroke();
+    ctx.strokeStyle = COLORS.energyBright;
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.arc(0, 0, layout.cell * 0.27, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "#1c3148";
+    pathRoundedRect(ctx, -turretHeadW * 0.72, -layout.cell * 0.14, layout.cell * 0.28, layout.cell * 0.24, layout.cell * 0.08);
+    ctx.fill();
+    pathRoundedRect(ctx, turretHeadW * 0.44, -layout.cell * 0.14, layout.cell * 0.28, layout.cell * 0.24, layout.cell * 0.08);
+    ctx.fill();
+
+    ctx.strokeStyle = "#e9fbff";
+    ctx.lineWidth = barrelWidth;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(layout.cell * 0.2, 0);
+    ctx.lineTo(barrelLength, 0);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(89,245,214,0.42)";
+    ctx.lineWidth = Math.max(2, barrelWidth * 0.44);
+    ctx.beginPath();
+    ctx.moveTo(layout.cell * 0.25, 0);
+    ctx.lineTo(barrelLength, 0);
+    ctx.stroke();
+    ctx.strokeStyle = `rgba(143,216,255,${0.08 + turretCharge * 0.28 + turretBurst * 0.18})`;
+    ctx.lineWidth = Math.max(1.4, barrelWidth * 0.24);
+    ctx.beginPath();
+    ctx.moveTo(layout.cell * 0.24, 0);
+    ctx.lineTo(barrelLength, 0);
+    ctx.stroke();
+    if (turretCharge > 0.12 || turretMuzzleFlash > 0.01) {
+      const muzzleGlow = 0.12 + turretCharge * 0.22 + turretMuzzleFlash * 0.54;
+      ctx.fillStyle = `rgba(143,216,255,${muzzleGlow})`;
+      ctx.beginPath();
+      ctx.ellipse(
+        barrelLength + layout.cell * 0.05,
+        0,
+        layout.cell * (0.08 + turretCharge * 0.08 + turretMuzzleFlash * 0.12),
+        layout.cell * (0.14 + turretCharge * 0.06 + turretMuzzleFlash * 0.12),
+        0,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+
+    ctx.fillStyle = "#13283f";
+    pathRoundedRect(ctx, layout.cell * 0.06, -layout.cell * 0.12, layout.cell * 0.44, layout.cell * 0.24, layout.cell * 0.08);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(140, 214, 255, 0.48)";
+    ctx.lineWidth = 1.3;
+    pathRoundedRect(ctx, layout.cell * 0.06, -layout.cell * 0.12, layout.cell * 0.44, layout.cell * 0.24, layout.cell * 0.08);
+    ctx.stroke();
+
+    ctx.restore();
+
+    ctx.fillStyle = `rgba(143,216,255,${0.08 + turretCharge * 0.12 + turretBurst * 0.1})`;
+    ctx.beginPath();
+    ctx.arc(barrelStartX, barrelStartY, layout.cell * (0.09 + turretCharge * 0.03), 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = `rgba(216,191,132,${0.18 + turretCharge * 0.26 + turretBurst * 0.12})`;
+    ctx.beginPath();
+    ctx.arc(barrelX, barrelY, layout.cell * (0.11 + turretMuzzleFlash * 0.04), 0, Math.PI * 2);
+    ctx.fill();
+    if (turretCharge > 0.08 || turretBurst > 0.01) {
+      ctx.strokeStyle = `rgba(143,216,255,${0.1 + turretCharge * 0.16 + turretBurst * 0.2})`;
+      ctx.lineWidth = Math.max(1.4, layout.cell * 0.06);
+      ctx.beginPath();
+      ctx.arc(layout.turretX, layout.turretY - layout.cell * 0.02, layout.cell * (0.62 + turretChargeWave * 0.04), -Math.PI * 0.84, -Math.PI * 0.18);
+      ctx.stroke();
+    }
+
+    for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
+      for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       const x = laneCenterX(layout, lane);
       const y = layerY(layer);
       const strength = renderGrid[layer][lane];
       const active = clamp(strength / 8, 0, 1);
       const routeActive = lane === activeLane;
 
-      const node = world.resources.network.nodes[layer][lane];
+      const node = renderNodeState(world, layer, lane);
 
       if (layer < NETWORK_LAYERS - 1) {
         const nextY = layerY(layer + 1);
@@ -4719,11 +5226,10 @@ function drawCombatScene(world, ctx) {
         network.sameTypeResonance &&
         lane < LANE_COUNT - 1 &&
         node.appearance &&
-        world.resources.network.nodes[layer][lane + 1] &&
-        world.resources.network.nodes[layer][lane + 1].appearance &&
-        node.appearance.id === world.resources.network.nodes[layer][lane + 1].appearance.id
+        renderNodeState(world, layer, lane + 1) &&
+        renderNodeState(world, layer, lane + 1).appearance &&
+        node.appearance.id === renderNodeState(world, layer, lane + 1).appearance.id
       ) {
-        const rightNode = world.resources.network.nodes[layer][lane + 1];
         const rightX = laneCenterX(layout, lane + 1);
         const resonanceGlow = layer < NETWORK_LAYERS - 1
           ? clamp((edgeFlow(layer, "resonanceRight", lane) + edgeFlow(layer, "resonanceLeft", lane + 1)) / 8, 0, 1)
@@ -4875,29 +5381,30 @@ function drawCombatScene(world, ctx) {
         ctx.lineWidth = 2;
       }
 
-      const stageGlow = routeActive ? layerSignalProgress(layer) : 0;
-      const nodeGlow = routeActive
-        ? network.pendingShot
-          ? layer === NETWORK_LAYERS - 1
-            ? 0.42
-            : layer === NETWORK_LAYERS - 2
-              ? 0.16
-              : 0
-          : 0.18 + stageGlow * 0.34
-        : 0;
-      const nodeRadius = layout.cell * 0.64;
-      drawNeuronNode(ctx, x, y, nodeRadius, node, nodeGlow, false);
+        const stageGlow = routeActive ? layerSignalProgress(layer) : 0;
+        const nodeGlow = routeActive
+          ? network.pendingShot
+            ? layer === NETWORK_LAYERS - 1
+              ? 0.42
+              : layer === NETWORK_LAYERS - 2
+                ? 0.16
+                : 0
+            : 0.18 + stageGlow * 0.34
+          : 0;
+        const nodeRadius = layout.cell * 0.64;
+        drawNeuronNode(ctx, x, y, nodeRadius, node, nodeGlow, false);
+      }
     }
-  }
 
-  for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-    const x = laneCenterX(layout, lane);
-    if (lane === activeLane && !network.pendingShot) {
-      const sourceStrength = 0.14 + layerSignalProgress(0) * 0.42;
-      ctx.fillStyle = `rgba(89,245,214,${sourceStrength})`;
-      ctx.beginPath();
-      ctx.arc(x, layerY(0), layout.cell * 0.28 + layerSignalProgress(0) * 3.2, 0, Math.PI * 2);
-      ctx.fill();
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const x = laneCenterX(layout, lane);
+      if (lane === activeLane && !network.pendingShot) {
+        const sourceStrength = 0.14 + layerSignalProgress(0) * 0.42;
+        ctx.fillStyle = `rgba(89,245,214,${sourceStrength})`;
+        ctx.beginPath();
+        ctx.arc(x, layerY(0), layout.cell * 0.28 + layerSignalProgress(0) * 3.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -5267,7 +5774,9 @@ function drawOverlay(world, ctx) {
     phase.name === "gameover"
       ? 0.76
       : phase.name === "camp"
-        ? 0.2
+        ? 0.16
+        : phase.name === "camp_target"
+          ? 0.08
         : phase.name === "doors"
           ? 0.16
           : phase.name === "shop"
@@ -5400,48 +5909,68 @@ function drawOverlay(world, ctx) {
     const drag = ui.drag;
     const t = performance.now() * 0.001;
     const moduleRects = rewardInlineModuleRects(layout, ui.cards.length);
+    const cardsTop = moduleRects[0] ? moduleRects[0].y : layout.contentTop + 100;
+    const cardsBottom = moduleRects.length ? moduleRects[moduleRects.length - 1].y + moduleRects[moduleRects.length - 1].height : cardsTop + 120;
+    const trayRect = {
+      x: layout.width * 0.06,
+      y: cardsTop - 10,
+      width: layout.width * 0.88,
+      height: cardsBottom - cardsTop + 20,
+    };
+    const rewardToolbarWidth = 226;
+    const rewardToolbarX = trayRect.x + trayRect.width * 0.5 - rewardToolbarWidth * 0.5;
+    const rewardLeaveRect = {
+      x: rewardToolbarX,
+      y: layout.contentTop + 4,
+      width: 108,
+      height: 46,
+    };
+    const rewardRerollRect = {
+      x: rewardToolbarX + 118,
+      y: layout.contentTop + 4,
+      width: 108,
+      height: 46,
+    };
+    const rewardRerollCost = ui.rerollCost && typeof ui.rerollCost.reward === "number" ? ui.rerollCost.reward : rerollCostFor("reward", 0);
+    const canRewardReroll = world.resources.run.money >= rewardRerollCost;
     const visual = pending ? pending.upgrade : null;
     const selectedRect = moduleRects[Math.max(0, ui.rewardSelection || 0)] || { x: layout.width * 0.5 - 50, y: layout.contentTop + layout.cell * 0.08, width: 100, height: 96 };
     const dragX = drag && drag.active ? (drag.hoverTarget ? drag.hoverTarget.x : drag.x) : selectedRect.x + selectedRect.width * 0.5;
     const dragY = drag && drag.active ? (drag.hoverTarget ? drag.hoverTarget.y : drag.y) : selectedRect.y + selectedRect.height * 0.5;
     const layerY = (layer) => networkLayerY(layout, layer);
 
+    ctx.fillStyle = "rgba(17, 23, 30, 0.16)";
+    pathRoundedRect(ctx, trayRect.x, trayRect.y, trayRect.width, trayRect.height, 20);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(246,248,251,0.08)";
+    ctx.lineWidth = 1;
+    pathRoundedRect(ctx, trayRect.x, trayRect.y, trayRect.width, trayRect.height, 20);
+    ctx.stroke();
+
     ui.cards.forEach((upgrade, index) => {
       const rect = moduleRects[index];
       const selected = index === (ui.rewardSelection || 0);
-      const textX = rect.x + 90;
-      const textWidth = rect.width - 108;
-      ctx.fillStyle = selected ? "rgba(7, 10, 14, 0.32)" : "rgba(7, 10, 14, 0.22)";
-      pathRoundedRect(ctx, rect.x, rect.y + 3, rect.width, rect.height, 12);
-      ctx.fill();
-      pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 12);
-      ctx.fillStyle = selected ? "rgba(30, 36, 44, 0.94)" : "rgba(22, 27, 34, 0.9)";
-      ctx.fill();
-      ctx.strokeStyle = selected ? "rgba(246,248,251,0.34)" : "rgba(246,248,251,0.12)";
-      ctx.lineWidth = selected ? 1.6 : 1;
-      pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 12);
-      ctx.stroke();
-      ctx.save();
-      ctx.translate(rect.x + 44, rect.y + rect.height * 0.5);
-      drawUpgradePreview(ctx, upgrade, 0, 0, 28);
-      ctx.restore();
-      const titleY = rect.y + 20;
-      const titleCount = drawWrappedTextBlock(ctx, upgrade.name, textX, titleY, 14, COLORS.text, textWidth, 16, 2);
-      const shortY = titleY + titleCount * 16 + 6;
-      const shortCount = drawWrappedTextBlock(
-        ctx,
-        upgrade.short,
-        textX,
-        shortY,
-        11,
-        selected ? COLORS.textDim : "rgba(168,178,194,0.86)",
-        textWidth,
-        13,
-        2,
-      );
-      const descY = shortY + shortCount * 13 + 8;
-      drawWrappedTextBlock(ctx, upgrade.description, textX, descY, 10, COLORS.textDim, textWidth, 12, 4);
+      drawOfferModuleCard(ctx, rect, upgrade, { selected, showDescription: true });
     });
+
+    if (!(drag && drag.active)) {
+      drawPillButton(ctx, rewardLeaveRect, true);
+      drawText(ctx, "Leave", rewardLeaveRect.x + rewardLeaveRect.width * 0.5, rewardLeaveRect.y + 27, 14, COLORS.text, "center");
+      button(world, rewardLeaveRect.x, rewardLeaveRect.y, rewardLeaveRect.width, rewardLeaveRect.height, "Leave", { action: "leave_reward" });
+
+      drawPillButton(ctx, rewardRerollRect, canRewardReroll);
+      drawText(ctx, "Reroll", rewardRerollRect.x + rewardRerollRect.width * 0.5, rewardRerollRect.y + 21, 14, COLORS.text, "center");
+      drawText(
+        ctx,
+        `$${rewardRerollCost}`,
+        rewardRerollRect.x + rewardRerollRect.width * 0.5,
+        rewardRerollRect.y + 37,
+        12,
+        canRewardReroll ? COLORS.warning : COLORS.textDim,
+        "center",
+      );
+      button(world, rewardRerollRect.x, rewardRerollRect.y, rewardRerollRect.width, rewardRerollRect.height, "Reroll", { action: "reroll_reward" });
+    }
 
     if (!(drag && drag.sourceKind === "node" && drag.active)) {
       for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
@@ -5501,7 +6030,7 @@ function drawOverlay(world, ctx) {
         const valid = canDropUpgradeOnNode(network, pending, target);
         const x = laneCenterX(layout, lane);
         const y = layerY(layer);
-        const node = network.nodes[layer][lane];
+        const node = renderNodeState(world, layer, lane);
         const radius = layout.cell * 0.76;
         ctx.fillStyle = valid ? "rgba(89,245,214,0.12)" : "rgba(255,255,255,0.04)";
         ctx.beginPath();
@@ -5542,7 +6071,7 @@ function drawOverlay(world, ctx) {
           : roomType === "shop"
             ? "Spend money on upgrades"
             : roomType === "camp"
-              ? "Recover 3 HP"
+              ? "Choose heal or neuron upgrade"
               : "Standard wave",
         x + cards.width / 2,
         y + 94,
@@ -5570,23 +6099,52 @@ function drawOverlay(world, ctx) {
   }
 
   if (phase.name === "shop") {
-    drawText(ctx, "Field Shop", layout.width / 2, layout.height * 0.15, 30, COLORS.text, "center");
     const cards = shopItemRects(layout, ui.shopStock.length);
     const controls = shopControlRects(layout, ui.shopStock.length);
+    const compactShop = compactShopLayout(layout);
     const drag = ui.drag;
     const pending = ui.pendingUpgrade;
     const visual = pending ? pending.upgrade : null;
     const cancelRect = controls.cancel;
+    const rerollRect = controls.reroll;
+    const rerollCost = ui.rerollCost && typeof ui.rerollCost.shop === "number" ? ui.rerollCost.shop : rerollCostFor("shop", 0);
+    const canShopReroll = world.resources.run.money >= rerollCost;
     const controlsAlpha = drag && drag.active ? 0.24 : 1;
     const layerY = (layer) => networkLayerY(layout, layer);
+
+    if (compactShop) {
+      const tray = {
+        x: layout.width * 0.06,
+        y: cards[0].y - 10,
+        width: layout.width * 0.88,
+        height: cards[cards.length - 1].y + cards[cards.length - 1].height - cards[0].y + 20,
+      };
+      ctx.fillStyle = "rgba(17, 23, 30, 0.16)";
+      pathRoundedRect(ctx, tray.x, tray.y, tray.width, tray.height, 20);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(246,248,251,0.08)";
+      ctx.lineWidth = 1;
+      pathRoundedRect(ctx, tray.x, tray.y, tray.width, tray.height, 20);
+      ctx.stroke();
+    } else {
+      drawText(ctx, "Field Shop", layout.width / 2, layout.height * 0.15, 30, COLORS.text, "center");
+    }
+
     ui.shopStock.forEach((item, index) => {
       const rect = cards[index];
       const x = rect.x;
       const y = rect.y;
-      drawButton(ctx, rect, !item.sold);
-      drawText(ctx, item.name, x + 14, y + 30, 20, COLORS.text);
-      drawText(ctx, item.description, x + 14, y + 70, 14, COLORS.textDim);
-      drawText(ctx, item.sold ? "Sold" : `$${item.price}`, x + 14, y + 154, 16, item.sold ? COLORS.textDim : COLORS.warning);
+      if (compactShop) {
+        drawOfferModuleCard(ctx, rect, item, {
+          price: item.price,
+          sold: item.sold,
+          showDescription: false,
+        });
+      } else {
+        drawText(ctx, item.name, x + 14, y + 30, 20, COLORS.text);
+        drawText(ctx, item.description, x + 14, y + 70, 14, COLORS.textDim);
+        drawText(ctx, item.sold ? "Sold" : `$${item.price}`, x + 14, y + 154, 16, item.sold ? COLORS.textDim : COLORS.warning);
+      }
       if (!item.sold) {
         button(world, x, y, rect.width, rect.height, item.name, { upgrade: item, price: item.price, item });
       }
@@ -5630,26 +6188,110 @@ function drawOverlay(world, ctx) {
 
     ctx.save();
     ctx.globalAlpha = controlsAlpha;
-    drawButton(ctx, controls.repair, true);
-    drawText(ctx, "Repair +2 HP", controls.repair.x + controls.repair.width * 0.5, controls.repair.y + 26, 16, COLORS.text, "center");
-    drawText(ctx, "$12", controls.repair.x + controls.repair.width * 0.5, controls.repair.y + 44, 14, COLORS.warning, "center");
+    drawPillButton(ctx, controls.repair, true);
+    drawText(ctx, compactShop ? "Repair" : "Repair +2 HP", controls.repair.x + controls.repair.width * 0.5, controls.repair.y + (compactShop ? 18 : 26), compactShop ? 14 : 16, COLORS.text, "center");
+    drawText(ctx, "$12", controls.repair.x + controls.repair.width * 0.5, controls.repair.y + (compactShop ? 33 : 44), 12, COLORS.warning, "center");
     ctx.restore();
     button(world, controls.repair.x, controls.repair.y, controls.repair.width, controls.repair.height, "Repair", { action: "repair" });
 
+    if (!(drag && drag.active)) {
+      ctx.save();
+      ctx.globalAlpha = controlsAlpha;
+      drawPillButton(ctx, rerollRect, canShopReroll);
+      drawText(ctx, "Reroll", rerollRect.x + rerollRect.width * 0.5, rerollRect.y + (compactShop ? 18 : 24), compactShop ? 14 : 16, COLORS.text, "center");
+      drawText(ctx, `$${rerollCost}`, rerollRect.x + rerollRect.width * 0.5, rerollRect.y + (compactShop ? 33 : 42), 12, canShopReroll ? COLORS.warning : COLORS.textDim, "center");
+      ctx.restore();
+      button(world, rerollRect.x, rerollRect.y, rerollRect.width, rerollRect.height, "Reroll", { action: "reroll_shop" });
+    }
+
     ctx.save();
     ctx.globalAlpha = controlsAlpha;
-    drawButton(ctx, controls.leave, true);
-    drawText(ctx, "Leave Shop", controls.leave.x + controls.leave.width * 0.5, controls.leave.y + 36, 18, COLORS.text, "center");
+    drawPillButton(ctx, controls.leave, true);
+    drawText(ctx, compactShop ? "Leave" : "Leave Shop", controls.leave.x + controls.leave.width * 0.5, controls.leave.y + (compactShop ? 26 : 36), compactShop ? 14 : 18, COLORS.text, "center");
     ctx.restore();
     button(world, controls.leave.x, controls.leave.y, controls.leave.width, controls.leave.height, "Leave", { action: "leave" });
     return;
   }
 
   if (phase.name === "camp") {
-    drawNodeDragTargets(ctx, layout, network, ui.drag);
-    drawText(ctx, "Camp Restored 3 HP", layout.width / 2, layout.height * 0.34, 28, COLORS.text, "center");
-    drawText(ctx, "Tap anywhere to continue.", layout.width / 2, layout.height * 0.4, 16, COLORS.textDim, "center");
-    button(world, 0, 0, layout.width, layout.height, "Continue");
+    const panel = {
+      x: layout.width * 0.08,
+      y: layout.height * 0.14,
+      width: layout.width * 0.84,
+      height: 286,
+    };
+    const healRect = {
+      x: panel.x + 16,
+      y: panel.y + 126,
+      width: panel.width - 32,
+      height: 76,
+    };
+    const upgradeRect = {
+      x: panel.x + 16,
+      y: panel.y + 212,
+      width: panel.width - 32,
+      height: 76,
+    };
+    ctx.fillStyle = "rgba(18, 23, 31, 0.9)";
+    pathRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 18);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(246,248,251,0.12)";
+    ctx.lineWidth = 1.2;
+    pathRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 18);
+    ctx.stroke();
+    drawText(ctx, "Camp", layout.width / 2, panel.y + 34, 30, COLORS.text, "center");
+    drawText(ctx, "Choose one benefit", layout.width / 2, panel.y + 62, 17, COLORS.textDim, "center");
+    drawText(ctx, "before returning to the map.", layout.width / 2, panel.y + 84, 17, COLORS.textDim, "center");
+
+    drawCampChoiceCard(ctx, healRect, "Heal Base", "+3 HP", COLORS.warning, "heal");
+    button(world, healRect.x, healRect.y, healRect.width, healRect.height, "Heal", { action: "camp_heal" });
+
+    drawCampChoiceCard(ctx, upgradeRect, "Upgrade Neuron", "Choose one node to empower", COLORS.energy, "upgrade");
+    button(world, upgradeRect.x, upgradeRect.y, upgradeRect.width, upgradeRect.height, "Upgrade", { action: "camp_upgrade" });
+    return;
+  }
+
+  if (phase.name === "camp_target") {
+    const { headerRect, cancelRect, selectionPanel, layerY: compactLayerY } = campTargetLayout(layout);
+
+    ctx.fillStyle = "rgba(17, 23, 30, 0.34)";
+    pathRoundedRect(ctx, headerRect.x, headerRect.y, headerRect.width, headerRect.height, 20);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(246,248,251,0.08)";
+    ctx.lineWidth = 1;
+    pathRoundedRect(ctx, headerRect.x, headerRect.y, headerRect.width, headerRect.height, 20);
+    ctx.stroke();
+    drawText(ctx, "Empower Neuron", headerRect.x + 20, headerRect.y + 36, 28, COLORS.text);
+    drawText(ctx, "Choose one neuron to empower.", headerRect.x + 20, headerRect.y + 64, 15, COLORS.textDim);
+
+    drawButton(ctx, cancelRect, true);
+    drawText(ctx, "Cancel", cancelRect.x + cancelRect.width * 0.5, cancelRect.y + 25, 15, COLORS.text, "center");
+    button(world, cancelRect.x, cancelRect.y, cancelRect.width, cancelRect.height, "Cancel", { action: "cancel_camp_target" });
+
+    ctx.fillStyle = "rgba(17, 23, 30, 0.3)";
+    pathRoundedRect(ctx, selectionPanel.x, selectionPanel.y, selectionPanel.width, selectionPanel.height, 22);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(246,248,251,0.08)";
+    ctx.lineWidth = 1;
+    pathRoundedRect(ctx, selectionPanel.x, selectionPanel.y, selectionPanel.width, selectionPanel.height, 22);
+    ctx.stroke();
+
+    for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
+      for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+        const target = { layer, lane };
+        const x = laneCenterX(layout, lane);
+        const y = compactLayerY(layer);
+        const node = renderNodeState(world, layer, lane);
+        const radius = layout.cell * 0.76;
+        ctx.strokeStyle = "rgba(89,245,214,0.18)";
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.arc(x, y, layout.cell * 1.08, 0, Math.PI * 2);
+        ctx.stroke();
+        drawNeuronNode(ctx, x, y, radius, node, 0.18, true);
+        neuronButton(world, x, y, target, layout.cell);
+      }
+    }
     return;
   }
 
@@ -5744,6 +6386,8 @@ export function resetRun(world, restoredProgress = null) {
     cards: [],
     roomOptions: [],
     shopStock: [],
+    rerollState: { reward: 0, shop: 0 },
+    rerollCost: { reward: rerollCostFor("reward", 0), shop: rerollCostFor("shop", 0) },
     pendingUpgrade: null,
     stagedReward: null,
     legendaryDrop: null,

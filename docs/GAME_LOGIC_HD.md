@@ -5,7 +5,7 @@ This file is the high-detail game logic and architecture reference for `Neural B
 Rule:
 Every gameplay or game-logic change must update this file in the same change set.
 This includes combat rules, rewards, upgrades, legendary perks, wave flow, room flow, economy, and player-facing battle behavior.
-If a temporary screenshot is added to diagnose a bug, that screenshot must be deleted in the same fix change set once the bug is addressed.
+If a temporary screenshot is added to diagnose a bug, that screenshot must be deleted as soon as it has been read and is no longer needed, in the same fix change set.
 
 ## Core Loop
 
@@ -178,9 +178,14 @@ DoT visibility rules:
 ## Rewards And Upgrades
 
 - Standard upgrades are dragged onto a specific neuron.
+- Camp rooms are no longer passive healing stops.
+- Camp now presents a choice: either heal the base for `+3 HP` or select one neuron to gain `+1` white damage.
 - A newly offered upgrade may only be dropped onto an empty neuron or merged into a neuron that already has the same upgrade type.
 - A newly offered upgrade must not overwrite a different installed item.
 - Reward UI shows three upgrade options.
+- Reward UI supports paid rerolls: the player may spend money to roll a new set of three reward upgrades.
+- Reward reroll cost starts at `$8` and increases by `$6` for each reroll within the same reward screen.
+- Reward UI also exposes `Leave`, allowing the player to skip the offered reward and continue the current flow without taking any upgrade.
 - The player should see upgrade preview, name, short text, and description before dragging.
 - Every successfully applied upgrade also gives that neuron `+1` plain white route damage.
 - That white damage only matters when a real signal reaches the neuron; an upgraded output neuron must not fire by itself without incoming charge.
@@ -305,6 +310,8 @@ Branch enemy themes:
 - Money that has already been picked up and is mid-flight to the wallet should still finish its flight and then be added.
 - Shop repairs restore base HP.
 - Shop upgrades are drag-and-drop onto neurons, like reward upgrades.
+- Shop also supports paid rerolls for its stock.
+- Shop reroll cost starts at `$10` and increases by `$8` for each reroll within the same shop visit.
 - Meta-progression is saved to `localStorage` when a branch is completed.
 - The saved meta state preserves the player build and completed branch list, then reloads the map from the base on the next start.
 
@@ -313,6 +320,7 @@ Branch enemy themes:
 - Buttons and overlays must not block important drag targets in the network.
 - Reward and shop overlays should preserve visibility of already-installed network links.
 - Tapping a neuron in combat, reward drag, or shop should open a small stat card for that neuron.
+- A drag attempt on an installed neuron must not open the inspect popup on release; inspect should only open from a clean tap/click without dragging.
 - Neurons with stacked status upgrades should glow brighter as their local effect stacks increase.
 - Debug behavior is secondary and should not interfere with gameplay.
 

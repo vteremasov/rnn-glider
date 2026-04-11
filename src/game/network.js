@@ -46,29 +46,31 @@ function scaleFlow(flow, amount) {
   };
 }
 
-function smoothArray(target, source, amount) {
+function smoothArray(target, source, riseAmount, fallAmount) {
   for (let index = 0; index < target.length; index += 1) {
+    const amount = source[index] >= target[index] ? riseAmount : fallAmount;
     target[index] += (source[index] - target[index]) * amount;
   }
 }
 
 function smoothDisplayState(state, delta) {
-  const amount = clamp(1 - Math.exp(-delta * 14), 0.12, 0.58);
+  const riseAmount = clamp(1 - Math.exp(-delta * 8.5), 0.08, 0.28);
+  const fallAmount = clamp(1 - Math.exp(-delta * 18), 0.22, 0.62);
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
-    smoothArray(state.displayGrid[layer], state.grid[layer], amount);
+    smoothArray(state.displayGrid[layer], state.grid[layer], riseAmount, fallAmount);
   }
   for (let layer = 0; layer < NETWORK_LAYERS - 1; layer += 1) {
     const displayFlow = state.displayEdgeFlows[layer];
     const sourceFlow = state.edgeFlows[layer];
-    smoothArray(displayFlow.forward, sourceFlow.forward, amount);
-    smoothArray(displayFlow.left, sourceFlow.left, amount);
-    smoothArray(displayFlow.right, sourceFlow.right, amount);
-    smoothArray(displayFlow.resonanceLeft, sourceFlow.resonanceLeft, amount);
-    smoothArray(displayFlow.resonanceRight, sourceFlow.resonanceRight, amount);
-    smoothArray(displayFlow.dividerLeft, sourceFlow.dividerLeft, amount);
-    smoothArray(displayFlow.dividerRight, sourceFlow.dividerRight, amount);
-    smoothArray(displayFlow.mergerLeft, sourceFlow.mergerLeft, amount);
-    smoothArray(displayFlow.mergerRight, sourceFlow.mergerRight, amount);
+    smoothArray(displayFlow.forward, sourceFlow.forward, riseAmount, fallAmount);
+    smoothArray(displayFlow.left, sourceFlow.left, riseAmount, fallAmount);
+    smoothArray(displayFlow.right, sourceFlow.right, riseAmount, fallAmount);
+    smoothArray(displayFlow.resonanceLeft, sourceFlow.resonanceLeft, riseAmount, fallAmount);
+    smoothArray(displayFlow.resonanceRight, sourceFlow.resonanceRight, riseAmount, fallAmount);
+    smoothArray(displayFlow.dividerLeft, sourceFlow.dividerLeft, riseAmount, fallAmount);
+    smoothArray(displayFlow.dividerRight, sourceFlow.dividerRight, riseAmount, fallAmount);
+    smoothArray(displayFlow.mergerLeft, sourceFlow.mergerLeft, riseAmount, fallAmount);
+    smoothArray(displayFlow.mergerRight, sourceFlow.mergerRight, riseAmount, fallAmount);
   }
 }
 

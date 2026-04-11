@@ -34,4 +34,4 @@ Detailed gameplay logic and architecture are documented in [docs/GAME_LOGIC_HD.m
 
 When gameplay logic changes, that file must be updated in the same change set.
 
-When a temporary screenshot is dropped into the repository to diagnose a bug, it must be deleted in the same fix change set after the bug is addressed.
+When a temporary screenshot is dropped into the repository to diagnose a bug, it must be deleted as soon as it has been read and is no longer needed, in the same fix change set.

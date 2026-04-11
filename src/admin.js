@@ -143,6 +143,34 @@ const DEFAULT_TASKS = [
     area: "combat",
     status: "idea",
   },
+  {
+    id: randomId(),
+    title: "Consumable temporary buffs",
+    notes: "Add temporary buffs that grant a large power spike but are destroyed or spent once used.",
+    area: "combat",
+    status: "idea",
+  },
+  {
+    id: randomId(),
+    title: "Enemy reactive resist profiles",
+    notes: "Give enemies resist-style reactions to statuses, for example regeneration while frozen or acceleration while burning.",
+    area: "combat",
+    status: "idea",
+  },
+  {
+    id: randomId(),
+    title: "Boss hits should be survivable",
+    notes: "Bosses and elites should hit very hard without instantly ending the run, so their mechanics can become more complex and interesting.",
+    area: "combat",
+    status: "idea",
+  },
+  {
+    id: randomId(),
+    title: "Order-dependent DPS synergies",
+    notes: "Create stronger DPS growth through neuron ordering and interdependence, not only by stacking isolated upgrades.",
+    area: "combat",
+    status: "idea",
+  },
 ];
 
 const UPGRADE_STATS = {
