@@ -106,7 +106,7 @@ const DEFAULT_TASKS = [
     title: "Deterministic seeded runs",
     notes: "Use pseudo-random generation with an explicit starting seed so a full run can be reproduced exactly. Debug mode should also allow setting the seed from the URL.",
     area: "other",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),

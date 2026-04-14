@@ -35,6 +35,7 @@ const devBranch = document.getElementById("dev-branch");
 const devDepth = document.getElementById("dev-depth");
 const devEnterMode = document.getElementById("dev-enter-mode");
 const devPreBossRoom = document.getElementById("dev-preboss-room");
+const devSeed = document.getElementById("dev-seed");
 const devResetBuild = document.getElementById("dev-reset-build");
 const devApply = document.getElementById("dev-apply");
 const devUpgrades = document.getElementById("dev-upgrades");
@@ -158,6 +159,7 @@ function defaultDevState() {
     upgrades[upgrade.id] = 0;
   }
   return {
+    seed: "",
     branchTheme: "spider",
     depth: 0,
     enterMode: "map",
@@ -174,6 +176,7 @@ function populateDevPanel() {
     return;
   }
   devToggle.classList.add("is-visible");
+  if (devSeed) devSeed.value = devState.seed || "";
   devBranch.value = devState.branchTheme;
   devEnterMode.value = devState.enterMode;
   devPreBossRoom.value = devState.preBossRoom;
@@ -254,8 +257,14 @@ if (devRequested && devToggle && devPanel) {
   devPreBossRoom.addEventListener("change", () => {
     devState.preBossRoom = devPreBossRoom.value;
   });
+  if (devSeed) {
+    devSeed.addEventListener("input", () => {
+      devState.seed = devSeed.value;
+    });
+  }
   devResetBuild.addEventListener("click", () => {
     const fresh = defaultDevState();
+    devState.seed = fresh.seed;
     devState.branchTheme = fresh.branchTheme;
     devState.depth = fresh.depth;
     devState.enterMode = fresh.enterMode;
@@ -346,6 +355,10 @@ function frame(now) {
   }
 
   requestAnimationFrame(frame);
+}
+
+requestAnimationFrame(frame);
+imationFrame(frame);
 }
 
 requestAnimationFrame(frame);

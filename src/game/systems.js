@@ -4206,6 +4206,10 @@ function drawMapScene(world, ctx) {
   drawButton(ctx, resetRect, false);
   drawText(ctx, "Reset Save", resetRect.x + resetRect.width * 0.5, resetRect.y + 27, 16, COLORS.text, "center");
   button(world, resetRect.x, resetRect.y, resetRect.width, resetRect.height, "Reset Save", { action: "reset_progress" });
+
+  if (run.seed) {
+    drawText(ctx, `Seed: ${run.seed}`, 16, layout.safeTop + 32, 14, COLORS.textDim, "left");
+  }
 }
 
 function drawText(ctx, text, x, y, size, color, align = "left") {
@@ -6802,12 +6806,19 @@ export function resizeSystem(world) {
   world.resources.layout = buildLayout(logicalWidth, logicalHeight);
 }
 
-export function resetRun(world, restoredProgress = null) {
+export function resetRun(world, restoredProgress = null, forcedSeed = null) {
+  let seedStr = forcedSeed || new URLSearchParams(window.location.search).get("seed");
+  if (!seedStr) {
+    seedStr = Math.random().toString(36).slice(2, 10);
+  }
+  world.resources.rng = createRng(seedStr);
+
   world.entities.clear();
   world.components.clear();
   world.resources.network = createNetworkState();
   world.resources.phase = { name: "map" };
   world.resources.run = {
+    seed: seedStr,
     wave: 0,
     currentRoomType: "combat",
     enemiesRemaining: 0,
