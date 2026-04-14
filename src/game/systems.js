@@ -2099,7 +2099,7 @@ function releasePendingSummons(world) {
       radius: kind.radius,
       hp,
       damage: hp,
-      speed: Math.max(92, 120 + kind.speed * 1.8),
+      speed: Math.max(46, 60 + kind.speed * 0.9),
       burn: summon.fire > 0 ? summon.fire * 2.4 : 0,
       curse: summon.curse > 0 ? summon.curse * 1.8 : 0,
     });
@@ -5842,11 +5842,6 @@ function drawCombatScene(world, ctx) {
     drawEnemy(ctx, dummyEnemy, x, y);
     drawEnemyStatuses(ctx, dummyEnemy, x, y, layout);
     
-    ctx.strokeStyle = "rgba(191, 238, 255, 0.8)";
-    ctx.lineWidth = Math.max(1.4, summon.radius * 0.08);
-    ctx.beginPath();
-    ctx.arc(x, y, summon.radius * 1.02, 0, Math.PI * 2);
-    ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
