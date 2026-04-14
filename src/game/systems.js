@@ -543,71 +543,91 @@ function projectileVisual(projectile) {
 }
 
 function drawEnemyStatuses(ctx, enemy, x, y, layout) {
+  const time = performance.now() * 0.002;
   const markers = [];
-  if (enemy.status.burn > 0) {
-    markers.push({ color: "#ff8b57", label: "B" });
-  }
-  if (enemy.status.curse > 0) {
-    markers.push({ color: "#a774ff", label: "V" });
-  }
-  if (enemy.status.slow > 0) {
-    markers.push({ color: "#63ffd5", label: "S" });
-  }
-  if (enemy.status.freeze > 0) {
-    markers.push({ color: "#ecfbff", label: "F" });
-  }
 
   if (enemy.status.burn > 0) {
-    ctx.strokeStyle = "rgba(255,139,87,0.65)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x, y, enemy.radius * 0.9, -1.8, -0.2);
-    ctx.stroke();
+    markers.push({ color: "#ff4d2a", label: "[ BRN ]" });
+    
+    // Flame particles
+    ctx.save();
+    ctx.translate(x, y + enemy.radius * 0.6);
+    ctx.globalCompositeOperation = "lighter";
+    const flameCount = 5;
+    for (let i = 0; i < flameCount; i++) {
+      const phase = time * (1.2 + i * 0.3) + i * 1.7;
+      const height = enemy.radius * (0.8 + Math.sin(phase) * 0.5);
+      const width = enemy.radius * (0.3 + Math.cos(phase * 1.3) * 0.15);
+      const offsetX = Math.sin(phase * 0.8) * enemy.radius * 0.6;
+      
+      ctx.beginPath();
+      ctx.moveTo(offsetX, 0);
+      ctx.quadraticCurveTo(offsetX - width, -height * 0.5, offsetX + Math.sin(phase)*width, -height);
+      ctx.quadraticCurveTo(offsetX + width, -height * 0.5, offsetX, 0);
+      
+      const r = 255;
+      const g = Math.floor(120 + Math.sin(phase)*60);
+      const b = 0;
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.5 + Math.sin(phase)*0.2})`;
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   if (enemy.status.curse > 0) {
-    ctx.strokeStyle = "rgba(167,116,255,0.56)";
-    ctx.lineWidth = 1.8;
-    ctx.beginPath();
-    ctx.ellipse(x, y - enemy.radius * 0.08, enemy.radius * 1.15, enemy.radius * 0.74, 0.22, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-
-  if (enemy.status.slow > 0) {
-    ctx.strokeStyle = "rgba(99,255,213,0.54)";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x - enemy.radius * 0.18, y, enemy.radius * 1.02, 2.2, 3.95);
-    ctx.stroke();
-  }
-
-  if (enemy.status.freeze > 0) {
-    ctx.strokeStyle = "#d9fbff";
+    markers.push({ color: "#b542ff", label: "[ VOID ]" });
+    
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1, 0.6);
+    ctx.rotate(-time * 0.8);
+    ctx.strokeStyle = "rgba(181, 66, 255, 0.75)";
     ctx.lineWidth = 2.2;
+    ctx.setLineDash([16, 8]);
     ctx.beginPath();
-    ctx.arc(x, y, enemy.radius * 1.08, 0, Math.PI * 2);
+    ctx.arc(0, 0, enemy.radius * 1.45, 0, Math.PI * 2);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  if (enemy.status.slow > 0) {
+    markers.push({ color: "#00e5ff", label: "[ SLW ]" });
+    
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = "rgba(0, 229, 255, 0.6)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 6]);
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius * 1.15, Math.PI * 0.8, Math.PI * 1.2);
+    ctx.arc(0, 0, enemy.radius * 1.15, Math.PI * 1.8, Math.PI * 2.2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  if (enemy.status.freeze > 0) {
+    markers.push({ color: "#ffffff", label: "[ FRZ ]" });
+    
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.85)";
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    ctx.arc(0, 0, enemy.radius * 1.05, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
   }
 
   if (markers.length === 0) {
     return;
   }
 
-  const badgeSize = Math.max(8, layout.cell * 0.28);
-  const totalWidth = markers.length * badgeSize + (markers.length - 1) * 4;
-  let badgeX = x - totalWidth * 0.5;
-  const badgeY = y - enemy.radius - layout.cell * 0.42;
-
-  for (const marker of markers) {
-    ctx.fillStyle = "rgba(7,14,24,0.82)";
-    pathRoundedRect(ctx, badgeX, badgeY, badgeSize, badgeSize, badgeSize * 0.28);
-    ctx.fill();
-    ctx.strokeStyle = marker.color;
-    ctx.lineWidth = 1.5;
-    pathRoundedRect(ctx, badgeX, badgeY, badgeSize, badgeSize, badgeSize * 0.28);
-    ctx.stroke();
-    drawText(ctx, marker.label, badgeX + badgeSize * 0.5, badgeY + badgeSize * 0.72, Math.max(8, badgeSize * 0.62), marker.color, "center");
-    badgeX += badgeSize + 4;
+  let labelY = y - enemy.radius - layout.cell * 0.3;
+  for (let i = markers.length - 1; i >= 0; i -= 1) {
+    const marker = markers[i];
+    drawText(ctx, marker.label, x, labelY, Math.max(9, layout.cell * 0.28), marker.color, "center");
+    labelY -= Math.max(12, layout.cell * 0.35);
   }
 }
 
