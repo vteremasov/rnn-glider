@@ -20,36 +20,11 @@ const REROLL_BASE_COST = {
   reward: 8,
   shop: 10,
 };
-const REROLL_STEP_COST = {
-  reward: 6,
-  shop: 8,
-};
-const CAMP_EMPOWER_UPGRADE = {
-  id: "campEmpower",
-  name: "Empower Neuron",
-  short: "+1 white route damage",
-  description: "Drag onto any neuron to permanently empower that node.",
-  color: "#8fd8ff",
-  icon: "+",
-  shape: "hex",
-};
 
-function weightedChoice(rng, items) {
-  const total = items.reduce((sum, item) => sum + (item.weight || 0), 0);
-  let roll = rng() * Math.max(total, 0.0001);
-  for (const item of items) {
-    roll -= item.weight || 0;
-    if (roll <= 0) {
-      return item;
-    }
-  }
-  return items[0] || null;
-}
-
-function rerollCostFor(context, count) {
+function rerollCostFor(context, count, wave = 0) {
   const base = REROLL_BASE_COST[context] || 8;
-  const step = REROLL_STEP_COST[context] || 6;
-  return base + step * Math.max(0, count || 0);
+  const scalingBase = base + Math.floor(wave * 1.5);
+  return Math.floor(scalingBase * Math.pow(2, Math.max(0, count || 0)));
 }
 
 const PERIODIC_STATUS_RULES = {
@@ -1248,7 +1223,7 @@ function rerollUpgrades(world, context) {
   const run = world.resources.run;
   const rerollState = ui.rerollState || { reward: 0, shop: 0 };
   const currentCount = rerollState[context] || 0;
-  const price = rerollCostFor(context, currentCount);
+  const price = rerollCostFor(context, currentCount, run.wave);
   if (run.money < price) {
     return false;
   }
@@ -1257,7 +1232,7 @@ function rerollUpgrades(world, context) {
   ui.rerollState = rerollState;
   ui.rerollCost = {
     ...(ui.rerollCost || {}),
-    [context]: rerollCostFor(context, currentCount + 1),
+    [context]: rerollCostFor(context, currentCount + 1, run.wave),
   };
   if (context === "reward") {
     refreshRewardOffers(world);
@@ -1537,7 +1512,7 @@ function openReward(world, options = {}) {
   };
   world.resources.ui.rerollCost = {
     ...(world.resources.ui.rerollCost || {}),
-    reward: rerollCostFor("reward", 0),
+    reward: rerollCostFor("reward", 0, world.resources.run.wave),
   };
   world.resources.ui.buttons = [];
 }
@@ -1619,7 +1594,7 @@ function openShop(world) {
   };
   world.resources.ui.rerollCost = {
     ...(world.resources.ui.rerollCost || {}),
-    shop: rerollCostFor("shop", 0),
+    shop: rerollCostFor("shop", 0, world.resources.run.wave),
   };
   world.resources.ui.buttons = [];
 }
@@ -6427,7 +6402,7 @@ function drawOverlay(world, ctx) {
           width: 108,
           height: 46,
         };
-    const rewardRerollCost = ui.rerollCost && typeof ui.rerollCost.reward === "number" ? ui.rerollCost.reward : rerollCostFor("reward", 0);
+    const rewardRerollCost = ui.rerollCost && typeof ui.rerollCost.reward === "number" ? ui.rerollCost.reward : rerollCostFor("reward", 0, world.resources.run.wave);
     const canRewardReroll = world.resources.run.money >= rewardRerollCost;
     const visual = pending ? pending.upgrade : null;
     const selectedRect = moduleRects[Math.max(0, ui.rewardSelection || 0)] || { x: layout.width * 0.5 - 50, y: layout.contentTop + layout.cell * 0.08, width: 100, height: 96 };
@@ -6605,7 +6580,7 @@ function drawOverlay(world, ctx) {
     const visual = pending ? pending.upgrade : null;
     const cancelRect = controls.cancel;
     const rerollRect = controls.reroll;
-    const rerollCost = ui.rerollCost && typeof ui.rerollCost.shop === "number" ? ui.rerollCost.shop : rerollCostFor("shop", 0);
+    const rerollCost = ui.rerollCost && typeof ui.rerollCost.shop === "number" ? ui.rerollCost.shop : rerollCostFor("shop", 0, world.resources.run.wave);
     const canShopReroll = world.resources.run.money >= rerollCost;
     const controlsAlpha = drag && drag.active ? 0.24 : 1;
     const layerY = (layer) => networkLayerY(layout, layer);
@@ -6903,7 +6878,7 @@ export function resetRun(world, restoredProgress = null, forcedSeed = null) {
     roomOptions: [],
     shopStock: [],
     rerollState: { reward: 0, shop: 0 },
-    rerollCost: { reward: rerollCostFor("reward", 0), shop: rerollCostFor("shop", 0) },
+    rerollCost: { reward: rerollCostFor("reward", 0, world.resources.run.wave), shop: rerollCostFor("shop", 0, world.resources.run.wave) },
     pendingUpgrade: null,
     stagedReward: null,
     legendaryDrop: null,

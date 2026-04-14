@@ -185,9 +185,9 @@ DoT visibility rules:
 - After applying the camp neuron upgrade, the run should enter a short `camp_finish` review state so the player can inspect or rearrange the lattice before returning to the map.
 - A newly offered upgrade may only be dropped onto an empty neuron or merged into a neuron that already has the same upgrade type.
 - A newly offered upgrade must not overwrite a different installed item.
-- Reward UI shows three upgrade options.
 - Reward UI supports paid rerolls: the player may spend money to roll a new set of three reward upgrades.
-- Reward reroll cost starts at `$8` and increases by `$6` for each reroll within the same reward screen.
+- Reward reroll base cost starts at $8 and increases by $1.5 for each cleared wave.
+- Each subsequent reroll within the same reward screen doubles in cost ($Base * 2^count$).
 - Reward UI also exposes `Leave`, allowing the player to skip the offered reward and continue the current flow without taking any upgrade.
 - The player should see upgrade preview, name, short text, and description before dragging.
 - Every successfully applied upgrade also gives that neuron `+1` plain white route damage.
@@ -319,7 +319,8 @@ Branch enemy themes:
 - Shop repairs restore base HP.
 - Shop upgrades are drag-and-drop onto neurons, like reward upgrades.
 - Shop also supports paid rerolls for its stock.
-- Shop reroll cost starts at `$10` and increases by `$8` for each reroll within the same shop visit.
+- Shop reroll base cost starts at $10 and increases by $1.5 for each cleared wave.
+- Each subsequent reroll within the same shop visit doubles in cost ($Base * 2^count$).
 - Meta-progression is saved to `localStorage` when a branch is completed.
 - The saved meta state preserves the player build and completed branch list, then reloads the map from the base on the next start.
 
