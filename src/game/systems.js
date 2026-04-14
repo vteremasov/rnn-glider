@@ -3016,13 +3016,6 @@ export function inputSystem(world) {
       resetRun(world);
       return;
     }
-    if (hit.action === "recenter_map") {
-      if (world.resources.run.mapCamera) {
-        world.resources.run.mapCamera.x = 0;
-        world.resources.run.mapCamera.y = 0;
-      }
-      return;
-    }
     if (hit && typeof hit.nodeId === "number") {
       enterMapNode(world, hit.nodeId);
     }
@@ -4164,16 +4157,6 @@ function drawMapScene(world, ctx) {
   drawButton(ctx, resetRect, false);
   drawText(ctx, "Reset Save", resetRect.x + resetRect.width * 0.5, resetRect.y + 27, 16, COLORS.text, "center");
   button(world, resetRect.x, resetRect.y, resetRect.width, resetRect.height, "Reset Save", { action: "reset_progress" });
-
-  const recenterRect = {
-    x: layout.width - 158,
-    y: layout.safeTop + 68,
-    width: 136,
-    height: 42,
-  };
-  drawButton(ctx, recenterRect, false);
-  drawText(ctx, "Recenter", recenterRect.x + recenterRect.width * 0.5, recenterRect.y + 27, 16, COLORS.text, "center");
-  button(world, recenterRect.x, recenterRect.y, recenterRect.width, recenterRect.height, "Recenter", { action: "recenter_map" });
 }
 
 function drawText(ctx, text, x, y, size, color, align = "left") {
