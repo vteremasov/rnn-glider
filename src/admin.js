@@ -113,7 +113,7 @@ const DEFAULT_TASKS = [
     title: "Improve overall visual polish",
     notes: "Push the full game look further: cleaner composition, stronger silhouettes, better effects, and more cohesive faction visuals.",
     area: "ui",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
