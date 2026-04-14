@@ -23,6 +23,15 @@ const REROLL_STEP_COST = {
   reward: 6,
   shop: 8,
 };
+const CAMP_EMPOWER_UPGRADE = {
+  id: "campEmpower",
+  name: "Empower Neuron",
+  short: "+1 white route damage",
+  description: "Drag onto any neuron to permanently empower that node.",
+  color: "#8fd8ff",
+  icon: "+",
+  shape: "hex",
+};
 
 function weightedChoice(rng, items) {
   const total = items.reduce((sum, item) => sum + (item.weight || 0), 0);
@@ -103,40 +112,36 @@ function networkLayerBounds(layout) {
 function campTargetLayout(layout) {
   const headerRect = {
     x: layout.width * 0.08,
-    y: layout.contentTop + 52,
+    y: layout.contentTop + 10,
     width: layout.width * 0.84,
-    height: 92,
+    height: 112,
   };
   const cancelRect = {
-    x: headerRect.x + headerRect.width - 116,
-    y: headerRect.y + 14,
+    x: headerRect.x + headerRect.width * 0.5 - 48,
+    y: headerRect.y + 8,
     width: 96,
     height: 38,
   };
   const selectionPanel = {
     x: layout.gridX - 12,
-    y: headerRect.y + headerRect.height + 18,
+    y: headerRect.y + headerRect.height + 12,
     width: layout.gridWidth + 24,
-    height: Math.min(layout.contentBottom - (headerRect.y + headerRect.height + 18) - 18, 246),
+    height: Math.min(layout.contentBottom - (headerRect.y + headerRect.height + 12) - 14, 284),
   };
   const layerY = (layer) => {
-    const topInset = 54;
-    const bottomInset = 38;
+    const topInset = 34;
+    const bottomInset = 30;
     const usableHeight = Math.max(120, selectionPanel.height - topInset - bottomInset);
     if (NETWORK_LAYERS <= 1) {
       return selectionPanel.y + topInset + usableHeight * 0.5;
     }
-    return selectionPanel.y + topInset + (usableHeight / (NETWORK_LAYERS - 1)) * layer;
+    return selectionPanel.y + topInset + usableHeight - (usableHeight / (NETWORK_LAYERS - 1)) * layer;
   };
   return { headerRect, cancelRect, selectionPanel, layerY };
 }
 
 function phaseLayerY(world, layer) {
-  const { layout, phase } = world.resources;
-  if (phase && phase.name === "camp_target") {
-    return campTargetLayout(layout).layerY(layer);
-  }
-  return networkLayerY(layout, layer);
+  return networkLayerY(world.resources.layout, layer);
 }
 
 function zigzagWave(time, period) {
@@ -1150,6 +1155,10 @@ function openMap(world) {
   world.resources.ui.legendaryDrop = null;
   world.resources.ui.neuronInspect = null;
   world.resources.ui.buttons = [];
+  if (world.resources.run.mapCamera) {
+    world.resources.run.mapCamera.x = 0;
+    world.resources.run.mapCamera.y = 0;
+  }
 }
 
 function upgradeById(upgradeId) {
@@ -1656,6 +1665,9 @@ function canDropUpgradeOnNode(network, pendingUpgrade, target) {
   if (!pendingUpgrade || !target) {
     return false;
   }
+  if (pendingUpgrade.source === "camp") {
+    return true;
+  }
   const node = network.nodes[target.layer][target.lane];
   if (!nodeHasInstalledUpgrade(node)) {
     return isValidUpgradeTarget(network, pendingUpgrade.upgrade, target);
@@ -1699,6 +1711,7 @@ function nodeEditingPhase(phaseName) {
   return phaseName === "reward_drag" ||
     phaseName === "shop" ||
     phaseName === "combat_finish" ||
+    phaseName === "camp_finish" ||
     phaseName === "camp" ||
     phaseName === "camp_target" ||
     phaseName === "reward_target" ||
@@ -1756,6 +1769,25 @@ function commitNodeReorder(world, origin, target) {
   if (targetOccupied && canMergeNodeSnapshots(sourceSnapshot, targetSnapshot)) {
     mergeNodeSnapshots(targetNode, sourceSnapshot, targetSnapshot);
     restoreNodeState(sourceNode, createEmptyNodeState());
+    const layout = world.resources.layout;
+    if (layout) {
+      createFlash(
+        world,
+        laneCenterX(layout, target.lane),
+        networkLayerY(layout, target.layer),
+        targetNode.appearance.color || COLORS.energy,
+        layout.cell * 1.12,
+        {
+          style: "merge",
+          accent: COLORS.energyBright,
+          life: 0.82,
+          upgradeId: targetNode.appearance.id,
+          icon: targetNode.appearance.icon,
+          shape: targetNode.appearance.shape,
+          level: targetNode.appearance.level,
+        },
+      );
+    }
     world.resources.ui.neuronInspect = null;
     world.resources.ui.legendaryInspect = null;
     return true;
@@ -1777,6 +1809,47 @@ function commitUpgradeTarget(world, target) {
     return;
   }
   if (!canDropUpgradeOnNode(world.resources.network, pending, target)) {
+    return;
+  }
+  if (pending.source === "camp") {
+    const node = world.resources.network.nodes[target.layer][target.lane];
+    if (!node) {
+      return;
+    }
+    node.power += 1;
+    world.resources.ui.neuronInspect = null;
+    world.resources.ui.legendaryInspect = null;
+    const layout = world.resources.layout;
+    if (layout) {
+      createFlash(
+        world,
+        laneCenterX(layout, target.lane),
+        networkLayerY(layout, target.layer),
+        CAMP_EMPOWER_UPGRADE.color,
+        layout.cell * 1.1,
+        {
+          style: "merge",
+          accent: COLORS.energyBright,
+          life: 0.84,
+          upgradeId: CAMP_EMPOWER_UPGRADE.id,
+          icon: CAMP_EMPOWER_UPGRADE.icon,
+          shape: CAMP_EMPOWER_UPGRADE.shape,
+          level: Math.max(1, node.power || 1),
+        },
+      );
+      createDamageText(
+        world,
+        laneCenterX(layout, target.lane),
+        networkLayerY(layout, target.layer) - layout.cell * 0.48,
+        "White +1",
+        "#e7fbff",
+      );
+    }
+    world.resources.ui.cards = [];
+    world.resources.ui.pendingUpgrade = null;
+    clearDragState(world.resources.ui);
+    world.resources.phase.name = "camp_finish";
+    world.resources.ui.buttons = [];
     return;
   }
   const result = applyUpgrade(world.resources.network, pending.upgrade, target);
@@ -1842,11 +1915,23 @@ function commitCampTarget(world, target) {
       laneCenterX(layout, target.lane),
       networkLayerY(layout, target.layer),
       COLORS.energyBright,
-      layout.cell * 0.96,
+      layout.cell * 1.28,
       {
         style: "shock",
         accent: "rgba(246, 248, 251, 0.72)",
-        life: 0.42,
+        life: 0.56,
+      },
+    );
+    createFlash(
+      world,
+      laneCenterX(layout, target.lane),
+      networkLayerY(layout, target.layer),
+      "rgba(143, 216, 255, 0.82)",
+      layout.cell * 1.6,
+      {
+        style: "shock",
+        accent: COLORS.energyBright,
+        life: 0.44,
       },
     );
     createDamageText(
@@ -1858,7 +1943,8 @@ function commitCampTarget(world, target) {
     );
   }
   world.resources.ui.pendingUpgrade = null;
-  completeMapRoom(world);
+  world.resources.phase.name = "camp_finish";
+  world.resources.ui.buttons = [];
 }
 
 function skipPendingUpgrade(world) {
@@ -1875,6 +1961,10 @@ function skipPendingUpgrade(world) {
 
   if (source === "shop") {
     world.resources.phase.name = "shop";
+    return;
+  }
+  if (source === "camp") {
+    completeMapRoom(world);
     return;
   }
   if (source === "map_entry") {
@@ -1900,7 +1990,16 @@ function openCamp(world) {
   world.resources.ui.pendingUpgrade = null;
   world.resources.ui.legendaryDrop = null;
   world.resources.ui.neuronInspect = null;
+  world.resources.ui.legendaryInspect = null;
+  clearDragState(world.resources.ui);
   world.resources.ui.buttons = [];
+}
+
+function openCampEmpower(world) {
+  openReward(world, {
+    source: "camp",
+    rewards: [CAMP_EMPOWER_UPGRADE],
+  });
 }
 
 function normalWaveEnemyCount(wave, run) {
@@ -2517,14 +2616,61 @@ function showNeuronInspect(world, target) {
 }
 
 function inspectablePhase(phaseName) {
-  return phaseName === "combat" || nodeEditingPhase(phaseName);
+  return phaseName === "combat" || (
+    nodeEditingPhase(phaseName) &&
+    phaseName !== "camp_target"
+  );
 }
 
 export function inputSystem(world) {
   const { pointer, phase, ui } = world.resources;
-  if ((phase.name === "combat" || phase.name === "combat_finish") && (pointer.pointerType === "mouse" || pointer.down)) {
+  if ((phase.name === "combat" || phase.name === "combat_finish" || phase.name === "camp_finish") && (pointer.pointerType === "mouse" || pointer.down)) {
     collectCoinAtPointer(world);
   }
+
+  if (phase.name === "map" && world.resources.run.mapCamera) {
+    const run = world.resources.run;
+    const camera = run.mapCamera;
+    if (pointer.down) {
+      if (!camera.dragging) {
+        const hitButton = ui.buttons.find((b) => {
+          return (
+            pointer.x >= b.x &&
+            pointer.x <= b.x + b.width &&
+            pointer.y >= b.y &&
+            pointer.y <= b.y + b.height
+          );
+        });
+        if (!hitButton) {
+          camera.dragging = true;
+          camera.lastPointerX = pointer.x;
+          camera.lastPointerY = pointer.y;
+          camera.dragStartX = pointer.x;
+          camera.dragStartY = pointer.y;
+          camera.didMove = false;
+        }
+      } else {
+        const dx = pointer.x - camera.lastPointerX;
+        const dy = pointer.y - camera.lastPointerY;
+        camera.x += dx;
+        camera.y += dy;
+        camera.lastPointerX = pointer.x;
+        camera.lastPointerY = pointer.y;
+        if (Math.hypot(pointer.x - camera.dragStartX, pointer.y - camera.dragStartY) > 5) {
+          camera.didMove = true;
+        }
+      }
+    } else {
+      camera.dragging = false;
+    }
+
+    if (pointer.justReleased && camera.didMove) {
+      pointer.justReleased = false;
+      camera.didMove = false;
+      return;
+    }
+  }
+
   if (nodeEditingPhase(phase.name) && ui.drag) {
     const layout = world.resources.layout;
     const network = world.resources.network;
@@ -2819,7 +2965,7 @@ export function inputSystem(world) {
       return;
     }
     if (hit.action === "camp_upgrade") {
-      world.resources.phase.name = "camp_target";
+      openCampEmpower(world);
       return;
     }
     return;
@@ -2855,10 +3001,24 @@ export function inputSystem(world) {
     return;
   }
 
+  if (phase.name === "camp_finish") {
+    if (hit.action === "finish_camp") {
+      completeMapRoom(world);
+    }
+    return;
+  }
+
   if (phase.name === "map") {
     if (hit.action === "reset_progress") {
       clearMetaProgress();
       resetRun(world);
+      return;
+    }
+    if (hit.action === "recenter_map") {
+      if (world.resources.run.mapCamera) {
+        world.resources.run.mapCamera.x = 0;
+        world.resources.run.mapCamera.y = 0;
+      }
       return;
     }
     if (hit && typeof hit.nodeId === "number") {
@@ -3527,6 +3687,69 @@ function drawCampChoiceCard(ctx, rect, title, subtitle, accent, icon) {
   drawText(ctx, subtitle, rect.x + 78, rect.y + 52, 14, accent);
 }
 
+function drawCampChoicePanel(ctx, rect, options = {}) {
+  const active = options.active !== false;
+  const accent = options.accent || COLORS.energy;
+  const title = options.title || "";
+  const subtitle = options.subtitle || "";
+  const detail = options.detail || "";
+  const icon = options.icon || "upgrade";
+
+  ctx.fillStyle = active ? "rgba(8, 12, 18, 0.28)" : "rgba(8, 12, 18, 0.18)";
+  pathRoundedRect(ctx, rect.x, rect.y + 4, rect.width, rect.height, 20);
+  ctx.fill();
+
+  const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.height);
+  fill.addColorStop(0, active ? "rgba(36, 43, 52, 0.98)" : "rgba(28, 34, 42, 0.9)");
+  fill.addColorStop(1, active ? "rgba(24, 29, 36, 0.98)" : "rgba(18, 22, 28, 0.9)");
+  ctx.fillStyle = fill;
+  pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 20);
+  ctx.fill();
+
+  ctx.strokeStyle = active ? "rgba(246,248,251,0.14)" : "rgba(246,248,251,0.08)";
+  ctx.lineWidth = 1.2;
+  pathRoundedRect(ctx, rect.x, rect.y, rect.width, rect.height, 20);
+  ctx.stroke();
+
+  ctx.strokeStyle = active ? accent : "rgba(168,178,194,0.24)";
+  ctx.lineWidth = active ? 2.1 : 1.2;
+  pathRoundedRect(ctx, rect.x + 1.5, rect.y + 1.5, rect.width - 3, rect.height - 3, 18);
+  ctx.stroke();
+
+  ctx.fillStyle = active ? "rgba(255,255,255,0.04)" : "rgba(255,255,255,0.02)";
+  pathRoundedRect(ctx, rect.x + 16, rect.y + 16, 54, 54, 16);
+  ctx.fill();
+  ctx.strokeStyle = active ? "rgba(246,248,251,0.1)" : "rgba(246,248,251,0.05)";
+  ctx.lineWidth = 1;
+  pathRoundedRect(ctx, rect.x + 16, rect.y + 16, 54, 54, 16);
+  ctx.stroke();
+
+  ctx.save();
+  ctx.translate(rect.x + 43, rect.y + 43);
+  ctx.globalAlpha = active ? 1 : 0.45;
+  if (icon === "heal") {
+    ctx.strokeStyle = active ? accent : COLORS.textDim;
+    ctx.lineWidth = 4;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(8, 0);
+    ctx.moveTo(0, -8);
+    ctx.lineTo(0, 8);
+    ctx.stroke();
+  } else {
+    drawUpgradePreview(ctx, { id: "overdrive", color: active ? accent : COLORS.textDim, icon: "+", shape: "hex", level: 1 }, 0, 0, 18);
+  }
+  ctx.restore();
+
+  const titleX = rect.x + 84;
+  drawText(ctx, title, titleX, rect.y + 28, 19, active ? COLORS.text : COLORS.textDim);
+  drawText(ctx, subtitle, titleX, rect.y + 50, 14, active ? accent : COLORS.textDim);
+  if (detail) {
+    drawWrappedTextBlock(ctx, detail, titleX, rect.y + 71, 12, active ? COLORS.textDim : "rgba(168,178,194,0.66)", rect.width - 102, 14, 2);
+  }
+}
+
 function drawOfferModuleCard(ctx, rect, upgrade, options = {}) {
   const selected = options.selected === true;
   const price = typeof options.price === "number" ? options.price : null;
@@ -3752,8 +3975,10 @@ function branchThemeMapColor(theme) {
 function mapProjection(layout, run) {
   const focusNode = mapNodeById(run, run.currentMapNodeId) || mapNodeById(run, 0);
   const scale = Math.min(layout.width, layout.height) * 0.16;
-  const centerX = layout.width * 0.5;
-  const centerY = layout.height * 0.54;
+  const cameraX = run.mapCamera ? run.mapCamera.x : 0;
+  const cameraY = run.mapCamera ? run.mapCamera.y : 0;
+  const centerX = layout.width * 0.5 + cameraX;
+  const centerY = layout.height * 0.54 + cameraY;
   return {
     focusNode,
     scale,
@@ -3937,6 +4162,16 @@ function drawMapScene(world, ctx) {
   drawButton(ctx, resetRect, false);
   drawText(ctx, "Reset Save", resetRect.x + resetRect.width * 0.5, resetRect.y + 27, 16, COLORS.text, "center");
   button(world, resetRect.x, resetRect.y, resetRect.width, resetRect.height, "Reset Save", { action: "reset_progress" });
+
+  const recenterRect = {
+    x: layout.width - 158,
+    y: layout.safeTop + 68,
+    width: 136,
+    height: 42,
+  };
+  drawButton(ctx, recenterRect, false);
+  drawText(ctx, "Recenter", recenterRect.x + recenterRect.width * 0.5, recenterRect.y + 27, 16, COLORS.text, "center");
+  button(world, recenterRect.x, recenterRect.y, recenterRect.width, recenterRect.height, "Recenter", { action: "recenter_map" });
 }
 
 function drawText(ctx, text, x, y, size, color, align = "left") {
@@ -4876,8 +5111,8 @@ function shieldSurfaceY(layout, x) {
 function drawCombatScene(world, ctx) {
   const { layout, run, network, turret } = world.resources;
   const phaseName = world.resources.phase.name;
-  const calmOverlay = world.resources.phase.name === "camp" || world.resources.phase.name === "camp_target";
-  const compactSelectionOverlay = world.resources.phase.name === "camp_target";
+  const calmOverlay = world.resources.phase.name === "camp";
+  const compactSelectionOverlay = false;
   const quietBackdrop = calmOverlay;
   const uiScale = layout.cell;
   const layerY = (layer) => networkLayerY(layout, layer);
@@ -6036,8 +6271,37 @@ function drawOverlay(world, ctx) {
     return;
   }
 
+  if (phase.name === "camp_finish") {
+    ctx.fillStyle = "rgba(16, 20, 26, 0.08)";
+    ctx.fillRect(0, 0, layout.width, layout.height);
+    drawNodeDragTargets(ctx, layout, network, ui.drag);
+    drawText(ctx, "Camp Upgrade Applied", layout.width * 0.5, layout.height * 0.16, 28, COLORS.text, "center");
+    drawText(ctx, "You can review or rearrange the lattice before leaving.", layout.width * 0.5, layout.height * 0.2, 15, COLORS.textDim, "center");
+    const finishRect = {
+      x: layout.width * 0.5 - 82,
+      y: layout.contentTop + 8,
+      width: 164,
+      height: 52,
+    };
+    drawButton(ctx, finishRect, true);
+    drawText(ctx, "Next", finishRect.x + finishRect.width * 0.46, finishRect.y + 34, 18, COLORS.text, "center");
+    ctx.strokeStyle = COLORS.text;
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(finishRect.x + finishRect.width * 0.7 - 10, finishRect.y + 26);
+    ctx.lineTo(finishRect.x + finishRect.width * 0.7 + 10, finishRect.y + 26);
+    ctx.lineTo(finishRect.x + finishRect.width * 0.7 + 2, finishRect.y + 18);
+    ctx.moveTo(finishRect.x + finishRect.width * 0.7 + 10, finishRect.y + 26);
+    ctx.lineTo(finishRect.x + finishRect.width * 0.7 + 2, finishRect.y + 34);
+    ctx.stroke();
+    button(world, finishRect.x, finishRect.y, finishRect.width, finishRect.height, "Next", { action: "finish_camp" });
+    return;
+  }
+
   if (phase.name === "reward_drag") {
     const pending = ui.pendingUpgrade;
+    const isCampReward = !!(pending && pending.source === "camp");
     const drag = ui.drag;
     const t = performance.now() * 0.001;
     const moduleRects = rewardInlineModuleRects(layout, ui.cards.length);
@@ -6049,7 +6313,7 @@ function drawOverlay(world, ctx) {
       width: layout.width * 0.88,
       height: cardsBottom - cardsTop + 20,
     };
-    const rewardToolbarWidth = 226;
+    const rewardToolbarWidth = isCampReward ? 108 : 226;
     const rewardToolbarX = trayRect.x + trayRect.width * 0.5 - rewardToolbarWidth * 0.5;
     const rewardLeaveRect = {
       x: rewardToolbarX,
@@ -6057,12 +6321,14 @@ function drawOverlay(world, ctx) {
       width: 108,
       height: 46,
     };
-    const rewardRerollRect = {
-      x: rewardToolbarX + 118,
-      y: layout.contentTop + 4,
-      width: 108,
-      height: 46,
-    };
+    const rewardRerollRect = isCampReward
+      ? null
+      : {
+          x: rewardToolbarX + 118,
+          y: layout.contentTop + 4,
+          width: 108,
+          height: 46,
+        };
     const rewardRerollCost = ui.rerollCost && typeof ui.rerollCost.reward === "number" ? ui.rerollCost.reward : rerollCostFor("reward", 0);
     const canRewardReroll = world.resources.run.money >= rewardRerollCost;
     const visual = pending ? pending.upgrade : null;
@@ -6090,18 +6356,20 @@ function drawOverlay(world, ctx) {
       drawText(ctx, "Leave", rewardLeaveRect.x + rewardLeaveRect.width * 0.5, rewardLeaveRect.y + 27, 14, COLORS.text, "center");
       button(world, rewardLeaveRect.x, rewardLeaveRect.y, rewardLeaveRect.width, rewardLeaveRect.height, "Leave", { action: "leave_reward" });
 
-      drawPillButton(ctx, rewardRerollRect, canRewardReroll);
-      drawText(ctx, "Reroll", rewardRerollRect.x + rewardRerollRect.width * 0.5, rewardRerollRect.y + 21, 14, COLORS.text, "center");
-      drawText(
-        ctx,
-        `$${rewardRerollCost}`,
-        rewardRerollRect.x + rewardRerollRect.width * 0.5,
-        rewardRerollRect.y + 37,
-        12,
-        canRewardReroll ? COLORS.warning : COLORS.textDim,
-        "center",
-      );
-      button(world, rewardRerollRect.x, rewardRerollRect.y, rewardRerollRect.width, rewardRerollRect.height, "Reroll", { action: "reroll_reward" });
+      if (rewardRerollRect) {
+        drawPillButton(ctx, rewardRerollRect, canRewardReroll);
+        drawText(ctx, "Reroll", rewardRerollRect.x + rewardRerollRect.width * 0.5, rewardRerollRect.y + 21, 14, COLORS.text, "center");
+        drawText(
+          ctx,
+          `$${rewardRerollCost}`,
+          rewardRerollRect.x + rewardRerollRect.width * 0.5,
+          rewardRerollRect.y + 37,
+          12,
+          canRewardReroll ? COLORS.warning : COLORS.textDim,
+          "center",
+        );
+        button(world, rewardRerollRect.x, rewardRerollRect.y, rewardRerollRect.width, rewardRerollRect.height, "Reroll", { action: "reroll_reward" });
+      }
     }
 
     if (!(drag && drag.sourceKind === "node" && drag.active)) {
@@ -6346,23 +6614,25 @@ function drawOverlay(world, ctx) {
   }
 
   if (phase.name === "camp") {
+    const canHeal = run.baseHp < run.maxBaseHp;
+    const healedHp = Math.min(run.maxBaseHp, run.baseHp + 3);
     const panel = {
       x: layout.width * 0.08,
       y: layout.height * 0.14,
       width: layout.width * 0.84,
-      height: 286,
+      height: 348,
     };
     const healRect = {
       x: panel.x + 16,
       y: panel.y + 126,
       width: panel.width - 32,
-      height: 76,
+      height: 92,
     };
     const upgradeRect = {
       x: panel.x + 16,
-      y: panel.y + 212,
+      y: panel.y + 230,
       width: panel.width - 32,
-      height: 76,
+      height: 92,
     };
     ctx.fillStyle = "rgba(18, 23, 31, 0.9)";
     pathRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 18);
@@ -6372,55 +6642,63 @@ function drawOverlay(world, ctx) {
     pathRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 18);
     ctx.stroke();
     drawText(ctx, "Camp", layout.width / 2, panel.y + 34, 30, COLORS.text, "center");
-    drawText(ctx, "Choose one benefit", layout.width / 2, panel.y + 62, 17, COLORS.textDim, "center");
-    drawText(ctx, "before returning to the map.", layout.width / 2, panel.y + 84, 17, COLORS.textDim, "center");
+    drawText(ctx, "Choose one benefit before returning to the map.", layout.width / 2, panel.y + 64, 16, COLORS.textDim, "center");
 
-    drawCampChoiceCard(ctx, healRect, "Heal Base", "+3 HP", COLORS.warning, "heal");
-    button(world, healRect.x, healRect.y, healRect.width, healRect.height, "Heal", { action: "camp_heal" });
+    drawCampChoicePanel(ctx, healRect, {
+      title: "Heal Base",
+      subtitle: canHeal ? `${run.baseHp}/${run.maxBaseHp} -> ${healedHp}/${run.maxBaseHp}` : "Base already full",
+      detail: canHeal ? "Restore structural integrity and keep the current route alive longer." : "Healing is unavailable because the base is already at maximum HP.",
+      accent: COLORS.warning,
+      icon: "heal",
+      active: canHeal,
+    });
+    if (canHeal) {
+      button(world, healRect.x, healRect.y, healRect.width, healRect.height, "Heal", { action: "camp_heal" });
+    }
 
-    drawCampChoiceCard(ctx, upgradeRect, "Upgrade Neuron", "Choose one node to empower", COLORS.energy, "upgrade");
+    drawCampChoicePanel(ctx, upgradeRect, {
+      title: "Upgrade Neuron",
+      subtitle: "Choose one node to empower",
+      detail: "Select any neuron in the lattice and permanently strengthen its white route damage.",
+      accent: COLORS.energy,
+      icon: "upgrade",
+      active: true,
+    });
     button(world, upgradeRect.x, upgradeRect.y, upgradeRect.width, upgradeRect.height, "Upgrade", { action: "camp_upgrade" });
     return;
   }
 
   if (phase.name === "camp_target") {
-    const { headerRect, cancelRect, selectionPanel, layerY: compactLayerY } = campTargetLayout(layout);
+    const { headerRect, cancelRect } = campTargetLayout(layout);
 
-    ctx.fillStyle = "rgba(17, 23, 30, 0.34)";
+    ctx.fillStyle = "rgba(16, 20, 26, 0.08)";
+    ctx.fillRect(0, 0, layout.width, layout.height);
+    drawNodeDragTargets(ctx, layout, network, ui.drag);
+
+    ctx.fillStyle = "rgba(17, 23, 30, 0.32)";
     pathRoundedRect(ctx, headerRect.x, headerRect.y, headerRect.width, headerRect.height, 20);
     ctx.fill();
     ctx.strokeStyle = "rgba(246,248,251,0.08)";
     ctx.lineWidth = 1;
     pathRoundedRect(ctx, headerRect.x, headerRect.y, headerRect.width, headerRect.height, 20);
     ctx.stroke();
-    drawText(ctx, "Empower Neuron", headerRect.x + 20, headerRect.y + 36, 28, COLORS.text);
-    drawText(ctx, "Choose one neuron to empower.", headerRect.x + 20, headerRect.y + 64, 15, COLORS.textDim);
-
-    drawButton(ctx, cancelRect, true);
+    drawPillButton(ctx, cancelRect, true);
     drawText(ctx, "Cancel", cancelRect.x + cancelRect.width * 0.5, cancelRect.y + 25, 15, COLORS.text, "center");
     button(world, cancelRect.x, cancelRect.y, cancelRect.width, cancelRect.height, "Cancel", { action: "cancel_camp_target" });
 
-    ctx.fillStyle = "rgba(17, 23, 30, 0.3)";
-    pathRoundedRect(ctx, selectionPanel.x, selectionPanel.y, selectionPanel.width, selectionPanel.height, 22);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(246,248,251,0.08)";
-    ctx.lineWidth = 1;
-    pathRoundedRect(ctx, selectionPanel.x, selectionPanel.y, selectionPanel.width, selectionPanel.height, 22);
-    ctx.stroke();
+    drawText(ctx, "Empower Neuron", layout.width * 0.5, headerRect.y + 74, 28, COLORS.text, "center");
+    drawText(ctx, "Choose one neuron to empower.", layout.width * 0.5, headerRect.y + 98, 15, COLORS.textDim, "center");
 
     for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
       for (let lane = 0; lane < LANE_COUNT; lane += 1) {
         const target = { layer, lane };
         const x = laneCenterX(layout, lane);
-        const y = compactLayerY(layer);
-        const node = renderNodeState(world, layer, lane);
-        const radius = layout.cell * 0.76;
+        const y = networkLayerY(layout, layer);
         ctx.strokeStyle = "rgba(89,245,214,0.18)";
         ctx.lineWidth = 1.1;
         ctx.beginPath();
         ctx.arc(x, y, layout.cell * 1.08, 0, Math.PI * 2);
         ctx.stroke();
-        drawNeuronNode(ctx, x, y, radius, node, 0.18, true);
         neuronButton(world, x, y, target, layout.cell);
       }
     }
@@ -6512,6 +6790,7 @@ export function resetRun(world, restoredProgress = null) {
     currentMapNodeId: 0,
     activeMapNodeId: null,
     pendingBranchComplete: false,
+    mapCamera: { x: 0, y: 0, dragging: false, lastPointerX: 0, lastPointerY: 0 },
   };
   world.resources.ui = {
     buttons: [],

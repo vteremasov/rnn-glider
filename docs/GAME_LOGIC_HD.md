@@ -179,7 +179,9 @@ DoT visibility rules:
 
 - Standard upgrades are dragged onto a specific neuron.
 - Camp rooms are no longer passive healing stops.
-- Camp now presents a choice: either heal the base for `+3 HP` or select one neuron to gain `+1` white damage.
+- Camp now presents a choice: either heal the base for `+3 HP` or open a reward-style drag screen that lets the player drop a one-time `Empower Neuron` buff onto any node.
+- The camp empower buff adds `+1` white route damage to the chosen neuron without replacing its installed upgrade.
+- After applying the camp neuron upgrade, the run should enter a short `camp_finish` review state so the player can inspect or rearrange the lattice before returning to the map.
 - A newly offered upgrade may only be dropped onto an empty neuron or merged into a neuron that already has the same upgrade type.
 - A newly offered upgrade must not overwrite a different installed item.
 - Reward UI shows three upgrade options.
@@ -270,6 +272,9 @@ Map rules:
 - At depth `13`, that branch should end in a single `boss` node instead of further normal branching.
 - Each branch keeps its own enemy faction from the opening split and passes that faction down through later child nodes.
 - The map should provide a `Reset Save` button that clears `localStorage` meta-progress and restores a fresh run.
+- The map is scrollable: the player can drag the map to pan the camera.
+- The map camera automatically resets to center on the current focus node whenever the map is opened or a room is cleared.
+- A `Recenter` button is available on the map to manually reset the camera focus.
 
 - `combat`
   Standard wave.

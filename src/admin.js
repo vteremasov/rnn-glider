@@ -171,6 +171,13 @@ const DEFAULT_TASKS = [
     area: "combat",
     status: "idea",
   },
+  {
+    id: randomId(),
+    title: "Scrollable route map camera",
+    notes: "Let the player inspect the full cleared route on the map after it grows beyond the viewport. Add camera panning so long branches are not clipped by the screen.",
+    area: "map",
+    status: "idea",
+  },
 ];
 
 const UPGRADE_STATS = {
