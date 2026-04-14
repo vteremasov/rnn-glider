@@ -68,8 +68,9 @@ If a temporary screenshot is added to diagnose a bug, that screenshot must be de
 - The neural network belongs to the player and sits below the combat lane.
 - The turret sits above the network.
 - When shield is active, it exists as a visible barrier in front of the base platform, closer to the enemies than base HP.
-- Shield collision must follow the outer curved dome of the shield, not a flat horizontal line.
-- When shield is gained, the dome should animate in rather than appearing instantly.
+- Shield collision follows the dynamic curved dome of the shield (1.6 cells high), synchronized with its appearance animation.
+- When shield is gained, the dome animates in by scaling its height and width from a base point, and collisions match this growth.
+- Visual shield includes an outer glow, an energy scanline, and a strong hit-flash reaction.
 - Combat must still remain readable on desktop by preserving a portrait-like aspect ratio.
 
 ## Neural Network Model
@@ -113,9 +114,9 @@ Validation rules:
 
 - There is one turret, not five independent cannons.
 - The turret rotates toward its current target.
-- The turret has no separate intrinsic fire delay once a charge packet has reached it.
-- As soon as the current packet has visibly arrived at the turret, the turret fires immediately.
-- Multi-output packets should still fire in order, one shot after another, but at a very high burst rate driven by successive charge arrivals rather than by a separate gun cooldown.
+- The turret has a short intrinsic fire delay (0.08s) once a charge packet reaches it, during which it accumulates power.
+- While charging for a shot, the turret barrel expands and shows an internal energy glow before releasing the projectile.
+- Multi-output packets fire in sequence, each preceded by a short charge buildup, creating a rhythmic burst pattern.
 - The turret uses the full route effects gathered from the active path.
 - `Overdrive` currently gives `+120%` route damage per stack and also scales the strength of applied statuses on that route.
 - `Overdrive` is aggregated from the full energized packet path, including branched/link-connected nodes, rather than only the straight source/output column.

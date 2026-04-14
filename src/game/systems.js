@@ -3186,11 +3186,26 @@ export function towerFireSystem(world, delta) {
   network.globalFireRateMultiplier = hasLegendaryPerk(run, "rapid_chamber") ? 2 : 1;
   network.sameTypeResonance = hasLegendaryPerk(run, "resonant_mesh");
   releasePendingSummons(world);
-  if (!bestTarget || network.queuedShots.length === 0) {
+
+  const shotChargeStep = 0.08 * (1 / (network.globalFireRateMultiplier || 1));
+  if (network.queuedShots.length > 0 && !turret.pendingShot && (turret.shotChargeTimer || 0) <= 0) {
+    turret.pendingShot = network.queuedShots.shift();
+    turret.shotChargeTimer = shotChargeStep;
+  }
+
+  if (turret.shotChargeTimer > 0) {
+    turret.shotChargeTimer -= delta;
+    const chargeWeight = 1 - clamp(turret.shotChargeTimer / shotChargeStep, 0, 1);
+    turret.chargeVisual = Math.max(turret.chargeVisual || 0, 1 + chargeWeight * 0.4);
+    if (turret.shotChargeTimer > 0) return;
+  }
+
+  if (!bestTarget || !turret.pendingShot) {
     return;
   }
 
-  const shot = network.queuedShots.shift();
+  const shot = turret.pendingShot;
+  turret.pendingShot = null;
   const combinedEffects = {};
   const sourceLane = typeof shot.sourceLane === "number" ? shot.sourceLane : shot.lane;
   for (const key of Object.keys(network.nodes[0][sourceLane].effects)) {
@@ -3314,7 +3329,7 @@ export function enemyMovementSystem(world, delta) {
       enemy.curseTickAccum = 0;
     }
 
-    const frozen = enemy.status.freeze > 0.04;
+    const frozen = (enemy.status.freeze || 0) > 0.04 || (enemy.shieldTouchCooldown || 0) > 0;
     const slowMultiplier = enemy.status.slow > 0 ? Math.max(0.42, 1 - enemy.status.slow * 0.32) : 1;
     const push = enemy.pushImpulse;
     enemy.pushImpulse = Math.max(0, enemy.pushImpulse - delta * 90);
@@ -3355,7 +3370,7 @@ export function enemyMovementSystem(world, delta) {
     }
 
     const enemyX = enemyScreenX(layout, enemy);
-    const shieldHitY = run.shield > 0 ? shieldSurfaceY(layout, enemyX) : 0;
+    const shieldHitY = run.shield > 0 ? shieldSurfaceY(layout, enemyX, run.shieldVisual || 0) : 0;
     const collidedShield = run.shield > 0 && enemy.shieldTouchCooldown <= 0 && enemy.y + enemy.radius >= shieldHitY;
     const collidedBase = run.shield <= 0 && enemy.y >= layout.baseLineY;
     if (collidedShield) {
@@ -3364,7 +3379,6 @@ export function enemyMovementSystem(world, delta) {
       createDamageText(world, 86, 64, "-1", "#8fd8ff");
       enemy.hp -= 1;
       enemy.hitFlash = Math.max(enemy.hitFlash || 0, 0.14);
-      enemy.status.freeze = Math.max(enemy.status.freeze, 0.16);
       enemy.pushImpulse = Math.max(enemy.pushImpulse, enemy.radius * 1.4 * (enemy.pushbackResistance || 1));
       enemy.shieldTouchCooldown = 0.16;
       enemy.y = Math.max(
@@ -5136,11 +5150,11 @@ function buildLayout(width, height) {
 function shieldGeometry(layout) {
   const shieldInset = layout.cell * 0.36;
   const domeWidth = layout.gridWidth - shieldInset * 2;
-  const domeHeight = layout.cell * 1.3;
+  const domeHeight = layout.cell * 1.6;
   const shieldY = layout.shieldLineY;
   const shieldCx = layout.gridX + layout.gridWidth * 0.5;
   const shieldRx = domeWidth * 0.5;
-  const shieldRy = domeHeight * 0.78;
+  const shieldRy = domeHeight * 0.82;
   return {
     shieldInset,
     domeWidth,
@@ -5149,17 +5163,20 @@ function shieldGeometry(layout) {
     shieldCx,
     shieldRx,
     shieldRy,
-    rimY: shieldY + layout.cell * 0.08,
-    highlightY: shieldY - layout.cell * 0.1,
+    rimY: shieldY + layout.cell * 0.12,
+    highlightY: shieldY - layout.cell * 0.15,
   };
 }
 
-function shieldSurfaceY(layout, x) {
+function shieldSurfaceY(layout, x, shieldVisual = 1) {
   const geometry = shieldGeometry(layout);
-  const rx = geometry.shieldRx * 0.94;
-  const ry = geometry.shieldRy * 0.86;
+  const rx = geometry.shieldRx * (0.82 + shieldVisual * 0.18) * 0.94;
+  const ry = geometry.shieldRy * (0.42 + shieldVisual * 0.58) * 0.86;
+  const rimY = geometry.rimY;
+  const highlightY = geometry.highlightY;
+  const renderHighlightY = rimY - (rimY - highlightY) * shieldVisual;
   const nx = clamp((x - geometry.shieldCx) / Math.max(rx, 1), -1, 1);
-  return geometry.highlightY - ry * Math.sqrt(Math.max(0, 1 - nx * nx));
+  return renderHighlightY - ry * Math.sqrt(Math.max(0, 1 - nx * nx));
 }
 
 function drawCombatScene(world, ctx) {
@@ -5247,13 +5264,18 @@ function drawCombatScene(world, ctx) {
     const { shieldY, shieldInset, domeHeight, rimY, highlightY, shieldCx, shieldRx, shieldRy } = shieldGeometry(layout);
     const shieldAppear = smoothStep(run.shieldVisual || 0);
     const pulse = run.shieldAppearPulse || 0;
+    const hitFlash = run.shieldHitFlash || 0;
     const renderRx = shieldRx * (0.82 + shieldAppear * 0.18);
     const renderRy = shieldRy * (0.42 + shieldAppear * 0.58);
     const renderHighlightY = rimY - (rimY - highlightY) * shieldAppear;
-    const fillAlpha = (0.05 + pulse * 0.06 + (run.shieldHitFlash || 0) * 0.12) * shieldAppear;
-    const glowAlpha = (0.16 + pulse * 0.1 + (run.shieldHitFlash || 0) * 0.16) * shieldAppear;
-    const rimAlpha = (0.24 + pulse * 0.12 + (run.shieldHitFlash || 0) * 0.34) * shieldAppear;
-    const lowerAlpha = (0.17 + pulse * 0.08 + (run.shieldHitFlash || 0) * 0.22) * shieldAppear;
+    
+    const fillAlpha = (0.07 + pulse * 0.1 + hitFlash * 0.2) * shieldAppear;
+    const glowAlpha = (0.2 + pulse * 0.15 + hitFlash * 0.25) * shieldAppear;
+    const rimAlpha = (0.3 + pulse * 0.2 + hitFlash * 0.5) * shieldAppear;
+    const lowerAlpha = (0.2 + pulse * 0.1 + hitFlash * 0.2) * shieldAppear;
+
+    ctx.shadowColor = "rgba(120, 212, 255, 0.5)";
+    ctx.shadowBlur = layout.cell * 0.4 * shieldAppear;
 
     ctx.fillStyle = `rgba(120, 212, 255, ${fillAlpha})`;
     ctx.beginPath();
@@ -5263,10 +5285,12 @@ function drawCombatScene(world, ctx) {
     ctx.closePath();
     ctx.fill();
 
+    ctx.shadowBlur = 0;
+
     const shieldGradient = ctx.createLinearGradient(0, shieldY - domeHeight * 0.82, 0, rimY + layout.cell * 0.26);
     shieldGradient.addColorStop(0, `rgba(224, 248, 255, ${glowAlpha})`);
-    shieldGradient.addColorStop(0.45, `rgba(130, 214, 255, ${(0.12 + pulse * 0.08 + (run.shieldHitFlash || 0) * 0.18) * shieldAppear})`);
-    shieldGradient.addColorStop(1, `rgba(64, 150, 220, ${(0.03 + pulse * 0.03 + (run.shieldHitFlash || 0) * 0.08) * shieldAppear})`);
+    shieldGradient.addColorStop(0.45, `rgba(130, 214, 255, ${(0.14 + pulse * 0.1 + hitFlash * 0.22) * shieldAppear})`);
+    shieldGradient.addColorStop(1, `rgba(64, 150, 220, ${(0.04 + pulse * 0.04 + hitFlash * 0.12) * shieldAppear})`);
     ctx.fillStyle = shieldGradient;
     ctx.beginPath();
     ctx.ellipse(shieldCx, shieldY, renderRx * 0.96, renderRy * 0.9, 0, Math.PI, 0);
@@ -5276,9 +5300,17 @@ function drawCombatScene(world, ctx) {
     ctx.fill();
 
     ctx.strokeStyle = `rgba(210, 244, 255, ${rimAlpha})`;
-    ctx.lineWidth = Math.max(1.6, layout.cell * 0.08);
+    ctx.lineWidth = Math.max(2.0, layout.cell * 0.1);
     ctx.beginPath();
     ctx.ellipse(shieldCx, renderHighlightY, renderRx * 0.94, renderRy * 0.86, 0, Math.PI, 0);
+    ctx.stroke();
+
+    const scanlineY = (world.resources.frameIndex * 0.02) % 1;
+    const scanAlpha = (0.15 + pulse * 0.1) * shieldAppear * Math.sin(scanlineY * Math.PI);
+    ctx.strokeStyle = `rgba(180, 240, 255, ${scanAlpha})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(shieldCx, renderHighlightY + renderRy * 0.6 * (scanlineY - 0.5), renderRx * 0.8, renderRy * 0.1, 0, Math.PI, 0);
     ctx.stroke();
 
     ctx.strokeStyle = `rgba(95, 194, 255, ${lowerAlpha})`;
@@ -5371,12 +5403,15 @@ function drawCombatScene(world, ctx) {
     const turretCoreFlash = turret.coreFlash || 0;
     const turretMuzzleFlash = turret.muzzleFlash || 0;
     const turretRecoil = turret.recoil || 0;
+    const turretChargeTimer = turret.shotChargeTimer || 0;
+    const shotChargeStep = 0.08 * (1 / (network.globalFireRateMultiplier || 1));
+    const chargingGlow = turretChargeTimer > 0 ? (1 - clamp(turretChargeTimer / shotChargeStep, 0, 1)) : 0;
     const turretBaseW = layout.cell * 2.6;
     const turretBaseH = layout.cell * 0.42;
     const turretHeadW = layout.cell * 1.48;
     const turretHeadH = layout.cell * 1.02;
     const barrelLength = layout.cell * (1.06 - turretRecoil * 0.08);
-    const barrelWidth = Math.max(4, layout.cell * 0.18);
+    const barrelWidth = Math.max(4, layout.cell * (0.18 + chargingGlow * 0.08));
     const barrelStartOffset = layout.cell * (0.46 - turretRecoil * 0.1);
     const barrelStartX = layout.turretX + Math.cos(world.resources.turret.angle) * barrelStartOffset;
     const barrelStartY = layout.turretY + Math.sin(world.resources.turret.angle) * barrelStartOffset;
@@ -5517,6 +5552,15 @@ function drawCombatScene(world, ctx) {
     ctx.moveTo(layout.cell * 0.2, 0);
     ctx.lineTo(barrelLength, 0);
     ctx.stroke();
+
+    if (chargingGlow > 0.01) {
+      ctx.strokeStyle = `rgba(255, 255, 255, ${chargingGlow * 0.8})`;
+      ctx.lineWidth = barrelWidth * 0.5;
+      ctx.beginPath();
+      ctx.moveTo(layout.cell * 0.22, 0);
+      ctx.lineTo(barrelLength * 0.96, 0);
+      ctx.stroke();
+    }
 
     ctx.strokeStyle = "rgba(89,245,214,0.42)";
     ctx.lineWidth = Math.max(2, barrelWidth * 0.44);
@@ -6877,7 +6921,10 @@ export function resetRun(world, restoredProgress = null, forcedSeed = null) {
     coreFlash: 0,
     muzzleFlash: 0,
     recoil: 0,
+    shotChargeTimer: 0,
+    pendingShot: null,
   };
+
   const progress = restoredProgress || readMetaProgress();
   if (progress) {
     applyMetaSnapshot(world, progress);
