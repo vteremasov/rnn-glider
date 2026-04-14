@@ -5825,7 +5825,9 @@ function drawCombatScene(world, ctx) {
     ctx.moveTo(x, y + summon.radius * 0.9);
     ctx.lineTo(x, y + summon.radius * 1.85);
     ctx.stroke();
-    drawEnemy(ctx, {
+    
+    const summonStatus = { burn: summon.burn || 0, curse: summon.curse || 0, slow: 0, freeze: 0 };
+    const dummyEnemy = {
       family: summon.family,
       shape: summon.shape,
       radius: summon.radius,
@@ -5835,8 +5837,11 @@ function drawCombatScene(world, ctx) {
       xOffset: 0,
       wormWave: 0,
       wormZigzagTime: 0,
-      status: { burn: 0, curse: 0, slow: 0, freeze: 0 },
-    }, x, y);
+      status: summonStatus,
+    };
+    drawEnemy(ctx, dummyEnemy, x, y);
+    drawEnemyStatuses(ctx, dummyEnemy, x, y, layout);
+    
     ctx.strokeStyle = "rgba(191, 238, 255, 0.8)";
     ctx.lineWidth = Math.max(1.4, summon.radius * 0.08);
     ctx.beginPath();
