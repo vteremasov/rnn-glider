@@ -358,7 +358,3 @@ function frame(now) {
 }
 
 requestAnimationFrame(frame);
-imationFrame(frame);
-}
-
-requestAnimationFrame(frame);
