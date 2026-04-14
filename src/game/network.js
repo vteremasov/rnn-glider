@@ -138,6 +138,18 @@ function packetOverdrive(state, grid) {
 
 function packetSummons(state, grid) {
   const summons = [];
+  let packetFire = 0;
+  let packetCurse = 0;
+  for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      if ((grid[layer][lane] || 0) <= 0.12) {
+        continue;
+      }
+      packetFire += state.nodes[layer][lane].effects.fire || 0;
+      packetCurse += state.nodes[layer][lane].effects.curse || 0;
+    }
+  }
+
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       if ((grid[layer][lane] || 0) <= 0.12) {
@@ -145,7 +157,7 @@ function packetSummons(state, grid) {
       }
       const count = Math.max(0, Math.round(state.nodes[layer][lane].effects.summon || 0));
       for (let index = 0; index < count; index += 1) {
-        summons.push({ layer, lane });
+        summons.push({ layer, lane, fire: packetFire, curse: packetCurse });
       }
     }
   }

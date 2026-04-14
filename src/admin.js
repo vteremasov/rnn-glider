@@ -134,7 +134,7 @@ const DEFAULT_TASKS = [
     title: "Summons should inherit fire and void effects",
     notes: "If signal passes through fire or curse upgrades, summoned allies should also apply burn or void curse on impact.",
     area: "combat",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),

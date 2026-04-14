@@ -162,6 +162,8 @@ export function createSummonBot(world, lane, y, kind) {
     hp: kind.hp,
     damage: kind.damage,
     speed: kind.speed || 118,
+    burn: kind.burn || 0,
+    curse: kind.curse || 0,
   });
   return entity;
 }

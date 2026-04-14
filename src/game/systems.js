@@ -2100,6 +2100,8 @@ function releasePendingSummons(world) {
       hp,
       damage: hp,
       speed: Math.max(92, 120 + kind.speed * 1.8),
+      burn: summon.fire > 0 ? summon.fire * 2.4 : 0,
+      curse: summon.curse > 0 ? summon.curse * 1.8 : 0,
     });
     createFlash(world, laneCenterX(layout, summon.lane), networkLayerY(layout, summon.layer), "rgba(143, 216, 255, 0.86)", layout.cell * 0.7, {
       style: "shock",
@@ -3403,8 +3405,8 @@ export function enemyMovementSystem(world, delta) {
         pierce: 0,
         split: 0,
         ricochet: 0,
-        burn: 0,
-        curse: 0,
+        burn: summon.burn || 0,
+        curse: summon.curse || 0,
         slow: 0,
         freeze: 0,
         pushback: 0,
@@ -5004,18 +5006,33 @@ function drawNodeDragTargets(ctx, layout, network, drag) {
 
 function drawBackground(ctx, width, height) {
   const gradient = ctx.createLinearGradient(0, 0, 0, height);
-  gradient.addColorStop(0, "#232a33");
-  gradient.addColorStop(0.38, "#1a1f27");
-  gradient.addColorStop(1, "#101318");
+  gradient.addColorStop(0, COLORS.bgPanel);
+  gradient.addColorStop(0.38, COLORS.bgPanel);
+  gradient.addColorStop(1, COLORS.bg);
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, width, height);
 
   const bloom = ctx.createRadialGradient(width * 0.5, height * 0.16, 0, width * 0.5, height * 0.16, height * 0.9);
-  bloom.addColorStop(0, "rgba(223, 230, 241, 0.08)");
-  bloom.addColorStop(0.35, "rgba(223, 230, 241, 0.03)");
+  bloom.addColorStop(0, "rgba(0, 229, 255, 0.05)");
+  bloom.addColorStop(0.35, "rgba(0, 229, 255, 0.02)");
   bloom.addColorStop(1, "rgba(0, 0, 0, 0)");
   ctx.fillStyle = bloom;
   ctx.fillRect(0, 0, width, height);
+
+  // Tactical Grid
+  ctx.strokeStyle = COLORS.grid;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  const cellSize = 32;
+  for (let x = 0; x <= width; x += cellSize) {
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, height);
+  }
+  for (let y = 0; y <= height; y += cellSize) {
+    ctx.moveTo(0, y);
+    ctx.lineTo(width, y);
+  }
+  ctx.stroke();
 }
 
 function buildLayout(width, height) {

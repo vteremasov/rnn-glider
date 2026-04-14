@@ -23,15 +23,15 @@
     <style>
       :root {
         color-scheme: dark;
-        --bg-0: #14171d;
-        --bg-1: #232a33;
-        --steel: #2c333b;
-        --line: #79879a;
-        --energy: #cfd7e6;
-        --energy-soft: rgba(207, 215, 230, 0.22);
-        --threat: #c86a56;
-        --threat-soft: rgba(212, 107, 79, 0.18);
-        --ink: #eef1f6;
+        --bg-0: #06080a;
+        --bg-1: #0d1116;
+        --steel: #1a232c;
+        --line: #304255;
+        --energy: #00e5ff;
+        --energy-soft: rgba(0, 229, 255, 0.15);
+        --threat: #ff2a4d;
+        --threat-soft: rgba(255, 42, 77, 0.15);
+        --ink: #e0e6ed;
       }
 
       * {
@@ -45,14 +45,32 @@
         min-height: 100%;
         overflow: hidden;
         background:
-          radial-gradient(circle at top, rgba(207, 215, 230, 0.08), transparent 34%),
-          linear-gradient(180deg, var(--bg-1), var(--bg-0) 58%, #101318);
-        font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+          radial-gradient(circle at top, rgba(0, 229, 255, 0.04), transparent 34%),
+          linear-gradient(180deg, var(--bg-1), var(--bg-0) 58%, #040507);
+        font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Courier New", monospace;
       }
 
       body {
         display: grid;
         place-items: stretch;
+      }
+
+      @keyframes scanline-drift {
+        0% { background-position: 0 0, 0 0; }
+        100% { background-position: 0 8px, 0 0; }
+      }
+
+      body::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: 
+          linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.1) 50%), 
+          radial-gradient(circle at center, transparent 40%, rgba(0, 0, 0, 0.6) 100%);
+        background-size: 100% 4px, 100% 100%;
+        z-index: 10;
+        animation: scanline-drift 3s linear infinite;
       }
 
       canvas {

@@ -5,22 +5,22 @@ export const GRID_ROWS = 16;
 export const ROOM_TYPES = ["combat", "elite", "shop", "camp", "boss"];
 
 export const COLORS = {
-  bg: "#14171d",
-  bgPanel: "#1d2229",
-  steel: "#2c333b",
-  grid: "rgba(186, 197, 214, 0.11)",
-  line: "#79879a",
-  energy: "#cfd7e6",
-  energySoft: "rgba(207, 215, 230, 0.22)",
-  energyBright: "#f6f8fb",
-  threat: "#c86a56",
-  threatSoft: "rgba(212, 107, 79, 0.18)",
-  warning: "#c9d1de",
-  text: "#eef1f6",
-  textDim: "#a8b2c2",
-  card: "#21262d",
-  cardAlt: "#292f37",
-  good: "#95c19c",
+  bg: "#06080a",
+  bgPanel: "#0d1116",
+  steel: "#1a232c",
+  grid: "rgba(0, 229, 255, 0.05)",
+  line: "#304255",
+  energy: "#00e5ff",
+  energySoft: "rgba(0, 229, 255, 0.15)",
+  energyBright: "#ffffff",
+  threat: "#ff2a4d",
+  threatSoft: "rgba(255, 42, 77, 0.15)",
+  warning: "#ffaa00",
+  text: "#e0e6ed",
+  textDim: "#6c8093",
+  card: "#11161d",
+  cardAlt: "#161c24",
+  good: "#00ff88",
 };
 
 export function clamp(value, min, max) {
