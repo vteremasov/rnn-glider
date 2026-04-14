@@ -549,26 +549,44 @@ function drawEnemyStatuses(ctx, enemy, x, y, layout) {
   if (enemy.status.burn > 0) {
     markers.push({ color: "#ff4d2a", label: "[ BRN ]" });
     
-    // Flame particles
+    // Roaring Fire
     ctx.save();
-    ctx.translate(x, y + enemy.radius * 0.6);
+    ctx.translate(x, y + enemy.radius * 0.8);
     ctx.globalCompositeOperation = "lighter";
-    const flameCount = 5;
+    
+    const flameCount = 8;
     for (let i = 0; i < flameCount; i++) {
-      const phase = time * (1.2 + i * 0.3) + i * 1.7;
-      const height = enemy.radius * (0.8 + Math.sin(phase) * 0.5);
-      const width = enemy.radius * (0.3 + Math.cos(phase * 1.3) * 0.15);
-      const offsetX = Math.sin(phase * 0.8) * enemy.radius * 0.6;
+      const phase = time * (2 + i * 0.4) + i * 2.1;
+      const height = enemy.radius * (1.2 + Math.sin(phase * 1.5) * 0.6);
+      const width = enemy.radius * (0.35 + Math.cos(phase * 1.1) * 0.15);
+      const offsetX = Math.sin(phase * 0.9) * enemy.radius * 0.7;
       
       ctx.beginPath();
       ctx.moveTo(offsetX, 0);
-      ctx.quadraticCurveTo(offsetX - width, -height * 0.5, offsetX + Math.sin(phase)*width, -height);
-      ctx.quadraticCurveTo(offsetX + width, -height * 0.5, offsetX, 0);
+      const tipX = offsetX + Math.sin(phase * 2.2) * width * 1.5;
+      ctx.quadraticCurveTo(offsetX - width, -height * 0.4, tipX, -height);
+      ctx.quadraticCurveTo(offsetX + width, -height * 0.4, offsetX, 0);
       
+      const intensity = i / (flameCount - 1);
       const r = 255;
-      const g = Math.floor(120 + Math.sin(phase)*60);
-      const b = 0;
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.5 + Math.sin(phase)*0.2})`;
+      const g = Math.floor(60 + intensity * 140 + Math.sin(phase) * 30);
+      const b = Math.floor(intensity * 40);
+      const a = 0.5 + Math.sin(phase) * 0.3;
+      
+      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${a})`;
+      ctx.fill();
+    }
+    
+    // Sparks
+    for (let i = 0; i < 5; i++) {
+      const sparkPhase = time * 2.5 + i * 1.8;
+      const progress = sparkPhase % 1;
+      const sparkY = -enemy.radius * 2.2 * progress;
+      const sparkX = Math.sin(sparkPhase * 3 + i) * enemy.radius * 0.9;
+      const sparkA = (1 - progress) * 0.8;
+      ctx.fillStyle = `rgba(255, 210, 80, ${sparkA})`;
+      ctx.beginPath();
+      ctx.arc(sparkX, sparkY, Math.max(1.5, enemy.radius * 0.12), 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
