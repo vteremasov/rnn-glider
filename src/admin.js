@@ -57,7 +57,7 @@ const DEFAULT_TASKS = [
     title: "Bosses need distinct abilities",
     notes: "Only spider boss keeps shield. Beetle boss loses shield and summons one small fast 1 HP beetle every 1s. Worm boss loses shield, appears as a butterfly in phase one, then splits into 2 elite worms on HP loss.",
     area: "content",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
@@ -71,7 +71,7 @@ const DEFAULT_TASKS = [
     title: "Visualize enemy shields",
     notes: "Add a clear visual shield layer or effect on enemies that currently have shield.",
     area: "ui",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
@@ -127,7 +127,7 @@ const DEFAULT_TASKS = [
     title: "Camp should offer heal or neuron upgrade",
     notes: "At camp, let the player choose between restoring health or improving a neuron instead of auto-healing only.",
     area: "content",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
@@ -155,7 +155,7 @@ const DEFAULT_TASKS = [
     title: "Enemy reactive resist profiles",
     notes: "Give enemies resist-style reactions to statuses, for example regeneration while frozen or acceleration while burning.",
     area: "combat",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
@@ -176,7 +176,7 @@ const DEFAULT_TASKS = [
     title: "Scrollable route map camera",
     notes: "Let the player inspect the full cleared route on the map after it grows beyond the viewport. Add camera panning so long branches are not clipped by the screen.",
     area: "map",
-    status: "idea",
+    status: "done",
   },
 ];
 
