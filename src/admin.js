@@ -19,6 +19,11 @@ const AUTO_DONE_TITLES = new Set([
   "Improve text readability",
   "Add game debug mode",
   "Improve signal transfer and turret charge animation",
+  "Visualize enemy shields",
+  "Bosses need distinct abilities",
+  "Camp should offer heal or neuron upgrade",
+  "Scrollable route map camera",
+  "Enemy reactive resist profiles",
 ]);
 
 function randomId() {
