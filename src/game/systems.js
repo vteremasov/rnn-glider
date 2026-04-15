@@ -525,36 +525,45 @@ function drawEnemyStatuses(ctx, enemy, x, y, layout) {
   if (enemy.status.burn > 0) {
     markers.push({ color: "#ff4d2a", label: "[ BRN ]" });
     
+    // Slow down fire animation
+    const fireTime = time * 0.4;
+    
     // Roaring Fire
     ctx.save();
     ctx.translate(x, y + enemy.radius * 0.8);
     ctx.globalCompositeOperation = "lighter";
     
+    const visualSize = Math.min(enemy.radius, 14 + Math.pow(enemy.radius, 0.5) * 1.5);
+    const spreadRadius = enemy.radius * 0.85;
+    
     // Base Core Glow
-    const flicker = Math.sin(time * 15) * 0.1 + Math.sin(time * 23) * 0.05;
+    const flicker = Math.sin(fireTime * 15) * 0.1 + Math.sin(fireTime * 23) * 0.05;
     ctx.fillStyle = `rgba(255, 60, 10, ${0.4 + flicker})`;
     ctx.beginPath();
-    ctx.ellipse(0, -enemy.radius * 0.3, enemy.radius * 1.1, enemy.radius * 0.8, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, -visualSize * 0.3, spreadRadius * 1.1, visualSize * 0.8, 0, 0, Math.PI * 2);
     ctx.fill();
     
-    const flameCount = 8;
+    const flameCount = Math.floor(8 + enemy.radius * 0.3);
+    
     for (let i = 0; i < flameCount; i++) {
-      const phase = time * (2 + i * 0.4) + i * 2.1;
-      const erratic = Math.sin(time * 12 + i) * 0.15; // Fast chaotic movement
-      const height = enemy.radius * (1.2 + Math.sin(phase * 1.5) * 0.6 + erratic);
-      const width = enemy.radius * (0.35 + Math.cos(phase * 1.1) * 0.15);
-      const offsetX = Math.sin(phase * 0.9) * enemy.radius * 0.7;
+      const spreadPos = (i / Math.max(1, flameCount - 1)) * 2 - 1; // -1 to 1
+      const phase = fireTime * (2 + (i % 5) * 0.4) + i * 2.1;
+      const erratic = Math.sin(fireTime * 12 + i) * 0.15; // Chaotic movement
+      
+      const height = visualSize * (1.2 + Math.sin(phase * 1.5) * 0.6 + erratic);
+      const width = visualSize * (0.35 + Math.cos(phase * 1.1) * 0.15);
+      const offsetX = spreadPos * spreadRadius + Math.sin(phase * 0.9) * visualSize * 0.4;
       
       ctx.beginPath();
       ctx.moveTo(offsetX, 0);
-      const tipX = offsetX + Math.sin(phase * 2.2) * width * 1.5 + erratic * enemy.radius;
+      const tipX = offsetX + Math.sin(phase * 2.2) * width * 1.5 + erratic * visualSize;
       ctx.quadraticCurveTo(offsetX - width, -height * 0.4, tipX, -height);
       ctx.quadraticCurveTo(offsetX + width, -height * 0.4, offsetX, 0);
       
-      const intensity = i / (flameCount - 1);
+      // Core flames brighter, edge flames cooler
+      const intensity = Math.abs(spreadPos) < 0.4 ? (0.6 + (i % 3) * 0.2) : (0.3 + (i % 3) * 0.2);
       const r = 255;
       const g = Math.floor(60 + intensity * 140 + Math.sin(phase) * 30);
-      // Add blue to the brightest core flames to make them white-hot
       const b = intensity > 0.7 ? Math.floor((intensity - 0.7) * 3.3 * 255) : 0;
       const a = 0.5 + Math.sin(phase) * 0.3;
       
@@ -563,13 +572,15 @@ function drawEnemyStatuses(ctx, enemy, x, y, layout) {
     }
     
     // Sparks
-    for (let i = 0; i < 6; i++) {
-      const sparkPhase = time * (2.0 + i * 0.2) + i * 1.8;
+    const sparkCount = Math.floor(6 + enemy.radius * 0.2);
+    for (let i = 0; i < sparkCount; i++) {
+      const spreadPos = (i / Math.max(1, sparkCount - 1)) * 2 - 1;
+      const sparkPhase = fireTime * (2.0 + (i % 6) * 0.2) + i * 1.8;
       const progress = sparkPhase % 1;
-      const sparkY = -enemy.radius * 2.5 * progress;
-      const sparkX = Math.sin(sparkPhase * 3 + i) * enemy.radius * (0.5 + progress * 0.8);
-      const sparkA = (1 - progress) * (0.7 + Math.sin(time * 18 + i) * 0.3);
-      const sparkSize = Math.max(1, enemy.radius * 0.15 * (1 - progress));
+      const sparkY = -(visualSize * 1.5 + enemy.radius * 0.5) * progress;
+      const sparkX = spreadPos * spreadRadius * 0.8 + Math.sin(sparkPhase * 3 + i) * visualSize * 1.2;
+      const sparkA = (1 - progress) * (0.7 + Math.sin(fireTime * 18 + i) * 0.3);
+      const sparkSize = Math.max(1, visualSize * 0.15 * (1 - progress));
       
       ctx.fillStyle = `rgba(255, 230, 100, ${sparkA})`;
       ctx.beginPath();
