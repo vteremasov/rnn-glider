@@ -97,7 +97,7 @@ const DEFAULT_TASKS = [
     title: "Add game debug mode",
     notes: "Allow jumping to a chosen tree depth and assembling a desired build immediately for testing runs.",
     area: "other",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
