@@ -39,6 +39,7 @@ const devPreBossRoom = document.getElementById("dev-preboss-room");
 const devSeed = document.getElementById("dev-seed");
 const devResetBuild = document.getElementById("dev-reset-build");
 const devApply = document.getElementById("dev-apply");
+const devPalette = document.getElementById("dev-palette");
 const devUpgrades = document.getElementById("dev-upgrades");
 const devLegendary = document.getElementById("dev-legendary");
 
@@ -201,7 +202,7 @@ if (!devState || !devState.grid) {
 }
 
 function populateDevPanel() {
-  if (!devRequested || !devToggle || !devPanel || !devDepth || !devUpgrades || !devLegendary) {
+  if (!devRequested || !devToggle || !devPanel || !devDepth || !devUpgrades || !devLegendary || !devPalette) {
     return;
   }
   devToggle.classList.add("is-visible");
@@ -221,30 +222,82 @@ function populateDevPanel() {
     devDepth.appendChild(option);
   }
 
+  devPalette.innerHTML = "";
+  for (const upgrade of UPGRADE_LIBRARY) {
+    const item = document.createElement("div");
+    item.className = "devtools-drag-item";
+    item.draggable = true;
+    item.textContent = upgrade.short || upgrade.name;
+    item.dataset.upgradeId = upgrade.id;
+    item.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", upgrade.id);
+      e.dataTransfer.effectAllowed = "copy";
+    });
+    devPalette.appendChild(item);
+  }
+
+  function renderGridCell(layer, lane, cell) {
+    const value = devState.grid && devState.grid[layer] && devState.grid[layer][lane] ? devState.grid[layer][lane] : "";
+    if (value) {
+      const parts = value.split(":");
+      const upgrade = UPGRADE_LIBRARY.find((u) => u.id === parts[0]);
+      if (upgrade) {
+        cell.textContent = `${upgrade.short || upgrade.name} ${parts[1]}`;
+        cell.style.color = upgrade.color || "#eef1f6";
+      } else {
+        cell.textContent = "-";
+        cell.style.color = "";
+      }
+    } else {
+      cell.textContent = "-";
+      cell.style.color = "";
+    }
+  }
+
   devUpgrades.innerHTML = "";
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
-      const select = document.createElement("select");
-      const noneOption = document.createElement("option");
-      noneOption.value = "";
-      noneOption.textContent = "-";
-      select.appendChild(noneOption);
-      for (const upgrade of UPGRADE_LIBRARY) {
-        for (let level = 1; level <= 3; level += 1) {
-          const option = document.createElement("option");
-          option.value = `${upgrade.id}:${level}`;
-          option.textContent = `${upgrade.short || upgrade.name} ${level}`;
-          select.appendChild(option);
-        }
-      }
-      select.value = devState.grid && devState.grid[layer] && devState.grid[layer][lane] ? devState.grid[layer][lane] : "";
-      select.addEventListener("change", () => {
-        if (!devState.grid) devState.grid = [];
-        if (!devState.grid[layer]) devState.grid[layer] = [];
-        devState.grid[layer][lane] = select.value;
-        saveDevState();
+      const cell = document.createElement("div");
+      cell.className = "devtools-grid-cell";
+      
+      renderGridCell(layer, lane, cell);
+
+      cell.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        cell.classList.add("drag-over");
       });
-      devUpgrades.appendChild(select);
+      cell.addEventListener("dragleave", () => {
+        cell.classList.remove("drag-over");
+      });
+      cell.addEventListener("drop", (e) => {
+        e.preventDefault();
+        cell.classList.remove("drag-over");
+        const upgradeId = e.dataTransfer.getData("text/plain");
+        if (upgradeId) {
+          if (!devState.grid) devState.grid = [];
+          if (!devState.grid[layer]) devState.grid[layer] = [];
+          devState.grid[layer][lane] = `${upgradeId}:1`;
+          saveDevState();
+          renderGridCell(layer, lane, cell);
+        }
+      });
+      cell.addEventListener("click", () => {
+        if (!devState.grid || !devState.grid[layer] || !devState.grid[layer][lane]) return;
+        const current = devState.grid[layer][lane];
+        const parts = current.split(":");
+        const upgradeId = parts[0];
+        let level = Number(parts[1]) || 1;
+        if (level >= 3) {
+          devState.grid[layer][lane] = "";
+        } else {
+          devState.grid[layer][lane] = `${upgradeId}:${level + 1}`;
+        }
+        saveDevState();
+        renderGridCell(layer, lane, cell);
+      });
+      
+      devUpgrades.appendChild(cell);
     }
   }
 

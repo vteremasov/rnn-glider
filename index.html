@@ -233,13 +233,51 @@
         padding-top: 4px;
       }
       
-      .devtools-grid-upgrades select {
-        padding: 4px;
-        font-size: 10px;
-        width: 100%;
-        text-align: center;
-        appearance: none;
+      .devtools-palette {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 4px 0 8px 0;
+      }
+
+      .devtools-drag-item {
+        background: #1a232c;
+        border: 1px solid rgba(246, 248, 251, 0.14);
         border-radius: 6px;
+        padding: 4px 6px;
+        font-size: 10px;
+        color: #eef1f6;
+        cursor: grab;
+        user-select: none;
+      }
+
+      .devtools-drag-item:active {
+        cursor: grabbing;
+      }
+
+      .devtools-grid-cell {
+        background: rgba(9, 13, 18, 0.88);
+        border: 1px solid rgba(246, 248, 251, 0.14);
+        border-radius: 6px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        color: #eef1f6;
+        cursor: pointer;
+        user-select: none;
+        overflow: hidden;
+        text-align: center;
+      }
+
+      .devtools-grid-cell:hover {
+        background: rgba(0, 229, 255, 0.08);
+      }
+
+      .devtools-grid-cell.drag-over {
+        border-color: #00e5ff;
+        background: rgba(0, 229, 255, 0.15);
       }
 
       .devtools-item {
@@ -316,6 +354,10 @@
           <button id="dev-reset-build" type="button">Reset Build</button>
           <button id="dev-apply" type="button">Apply Scenario</button>
         </div>
+        <label>
+          Palette (Drag to grid)
+          <div id="dev-palette" class="devtools-palette"></div>
+        </label>
         <label>
           Upgrades (Layer 1 top, Layer 3 bottom)
           <div id="dev-upgrades" class="devtools-grid-upgrades"></div>
