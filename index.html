@@ -226,6 +226,22 @@
         padding-top: 4px;
       }
 
+      .devtools-grid-upgrades {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+        padding-top: 4px;
+      }
+      
+      .devtools-grid-upgrades select {
+        padding: 4px;
+        font-size: 10px;
+        width: 100%;
+        text-align: center;
+        appearance: none;
+        border-radius: 6px;
+      }
+
       .devtools-item {
         display: grid;
         grid-template-columns: 1fr 72px;
@@ -301,8 +317,8 @@
           <button id="dev-apply" type="button">Apply Scenario</button>
         </div>
         <label>
-          Upgrades
-          <div id="dev-upgrades" class="devtools-list"></div>
+          Upgrades (Layer 1 top, Layer 3 bottom)
+          <div id="dev-upgrades" class="devtools-grid-upgrades"></div>
         </label>
         <label>
           Legendary

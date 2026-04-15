@@ -1,5 +1,6 @@
 import { World } from "./ecs/world.js";
 import { createNetworkState } from "./game/network.js";
+import { NETWORK_LAYERS, LANE_COUNT } from "./game/config.js";
 import { UPGRADE_LIBRARY } from "./game/upgrades.js";
 import { LEGENDARY_PERKS } from "./game/catalog.js";
 import {
@@ -153,10 +154,35 @@ if (debugRequested) {
   debugPanel.classList.add("is-visible");
 }
 
+const DEV_STATE_KEY = "neural-bastion-dev-state";
+
+function loadDevState() {
+  try {
+    const raw = localStorage.getItem(DEV_STATE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return parsed;
+      }
+    }
+  } catch {}
+  return null;
+}
+
+function saveDevState() {
+  try {
+    localStorage.setItem(DEV_STATE_KEY, JSON.stringify(devState));
+  } catch {}
+}
+
 function defaultDevState() {
-  const upgrades = {};
-  for (const upgrade of UPGRADE_LIBRARY) {
-    upgrades[upgrade.id] = 0;
+  const grid = [];
+  for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
+    const row = [];
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      row.push("");
+    }
+    grid.push(row);
   }
   return {
     seed: "",
@@ -164,12 +190,15 @@ function defaultDevState() {
     depth: 0,
     enterMode: "map",
     preBossRoom: "shop",
-    upgrades,
+    grid,
     legendary: [],
   };
 }
 
-const devState = defaultDevState();
+let devState = loadDevState();
+if (!devState || !devState.grid) {
+  devState = defaultDevState();
+}
 
 function populateDevPanel() {
   if (!devRequested || !devToggle || !devPanel || !devDepth || !devUpgrades || !devLegendary) {
@@ -193,19 +222,30 @@ function populateDevPanel() {
   }
 
   devUpgrades.innerHTML = "";
-  for (const upgrade of UPGRADE_LIBRARY) {
-    const row = document.createElement("label");
-    row.className = "devtools-item";
-    row.innerHTML = `
-      <span>${upgrade.name}</span>
-      <input type="number" min="0" max="12" step="1" value="${devState.upgrades[upgrade.id] || 0}" data-upgrade-id="${upgrade.id}" />
-    `;
-    const input = row.querySelector("input");
-    input.addEventListener("input", () => {
-      devState.upgrades[upgrade.id] = Math.max(0, Math.min(12, Number(input.value) || 0));
-      input.value = String(devState.upgrades[upgrade.id]);
-    });
-    devUpgrades.appendChild(row);
+  for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const select = document.createElement("select");
+      const noneOption = document.createElement("option");
+      noneOption.value = "";
+      noneOption.textContent = "-";
+      select.appendChild(noneOption);
+      for (const upgrade of UPGRADE_LIBRARY) {
+        for (let level = 1; level <= 3; level += 1) {
+          const option = document.createElement("option");
+          option.value = `${upgrade.id}:${level}`;
+          option.textContent = `${upgrade.short || upgrade.name} ${level}`;
+          select.appendChild(option);
+        }
+      }
+      select.value = devState.grid && devState.grid[layer] && devState.grid[layer][lane] ? devState.grid[layer][lane] : "";
+      select.addEventListener("change", () => {
+        if (!devState.grid) devState.grid = [];
+        if (!devState.grid[layer]) devState.grid[layer] = [];
+        devState.grid[layer][lane] = select.value;
+        saveDevState();
+      });
+      devUpgrades.appendChild(select);
+    }
   }
 
   devLegendary.innerHTML = "";
@@ -224,6 +264,7 @@ function populateDevPanel() {
       } else {
         devState.legendary = devState.legendary.filter((id) => id !== perk.id);
       }
+      saveDevState();
     });
     devLegendary.appendChild(row);
   }
@@ -235,7 +276,7 @@ function collectDevScenario() {
     depth: devDepth ? Number(devDepth.value) || 0 : devState.depth,
     enterMode: devEnterMode ? devEnterMode.value : devState.enterMode,
     preBossRoom: devPreBossRoom ? devPreBossRoom.value : devState.preBossRoom,
-    upgrades: { ...devState.upgrades },
+    grid: devState.grid ? JSON.parse(JSON.stringify(devState.grid)) : [],
     legendary: devState.legendary.slice(),
   };
 }
@@ -247,19 +288,24 @@ if (devRequested && devToggle && devPanel) {
   });
   devBranch.addEventListener("change", () => {
     devState.branchTheme = devBranch.value;
+    saveDevState();
   });
   devDepth.addEventListener("change", () => {
     devState.depth = Number(devDepth.value) || 0;
+    saveDevState();
   });
   devEnterMode.addEventListener("change", () => {
     devState.enterMode = devEnterMode.value;
+    saveDevState();
   });
   devPreBossRoom.addEventListener("change", () => {
     devState.preBossRoom = devPreBossRoom.value;
+    saveDevState();
   });
   if (devSeed) {
     devSeed.addEventListener("input", () => {
       devState.seed = devSeed.value;
+      saveDevState();
     });
   }
   devResetBuild.addEventListener("click", () => {
@@ -270,7 +316,8 @@ if (devRequested && devToggle && devPanel) {
     devState.enterMode = fresh.enterMode;
     devState.preBossRoom = fresh.preBossRoom;
     devState.legendary = fresh.legendary.slice();
-    devState.upgrades = { ...fresh.upgrades };
+    devState.grid = JSON.parse(JSON.stringify(fresh.grid));
+    saveDevState();
     populateDevPanel();
   });
   devApply.addEventListener("click", () => {

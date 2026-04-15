@@ -1297,17 +1297,22 @@ function pickDebugUpgradeTarget(network, upgrade) {
 }
 
 function applyDebugBuild(world, config) {
+  if (!config.grid) return;
   const network = world.resources.network;
-  for (const upgrade of UPGRADE_LIBRARY) {
-    const count = Math.max(0, Number(config.upgrades && config.upgrades[upgrade.id]) || 0);
-    for (let step = 0; step < count; step += 1) {
-      const target = pickDebugUpgradeTarget(network, upgrade);
-      if (!target) {
-        break;
-      }
-      const result = applyUpgrade(network, upgrade, target);
-      if (!result || !result.applied) {
-        break;
+  for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
+    if (!config.grid[layer]) continue;
+    for (let lane = 0; lane < LANE_COUNT; lane += 1) {
+      const cellValue = config.grid[layer][lane];
+      if (cellValue) {
+        const parts = cellValue.split(":");
+        const upgradeId = parts[0];
+        const targetLevel = Math.max(1, Number(parts[1]) || 1);
+        const upgrade = UPGRADE_LIBRARY.find((u) => u.id === upgradeId);
+        if (upgrade) {
+          for (let step = 0; step < targetLevel; step += 1) {
+            applyUpgrade(network, upgrade, { layer, lane });
+          }
+        }
       }
     }
   }
