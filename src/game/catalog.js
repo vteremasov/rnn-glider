@@ -64,4 +64,17 @@ export const LEGENDARY_PERKS = [
     icon: "R",
     shape: "square",
   },
+  {
+    id: "kinetic_buffer",
+    name: "Kinetic Buffer",
+    short: "Shield cap: UNLIMITED.",
+    description: "Removes the limit on how many shield layers you can accumulate. Stack defense indefinitely.",
+    stats: [
+      "Shield cap: UNLIMITED",
+      "Stack shields beyond the normal limit of 8",
+    ],
+    color: "#a2ff8d",
+    icon: "B",
+    shape: "hex",
+  },
 ];

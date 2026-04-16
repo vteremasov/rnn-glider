@@ -25,6 +25,7 @@ const AUTO_DONE_TITLES = new Set([
   "Scrollable route map camera",
   "Enemy reactive resist profiles",
   "Add paid upgrade rerolls",
+  "Add legendary that unlocks shield cap",
 ]);
 
 function randomId() {
@@ -126,7 +127,7 @@ const DEFAULT_TASKS = [
     title: "Add legendary that unlocks shield cap",
     notes: "Introduce a legendary item that removes or raises the player's maximum shield limit.",
     area: "content",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
@@ -209,6 +210,7 @@ const LEGENDARY_STATS = {
   void_resonance: ["Every slow proc this battle: +20% void damage"],
   resonant_mesh: ["Adjacent matching upgrade types auto-link sideways"],
   rapid_chamber: ["Global fire rate multiplier: +100%"],
+  kinetic_buffer: ["Shield cap: UNLIMITED (or 99)"],
 };
 
 function usableStorage() {

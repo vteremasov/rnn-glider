@@ -1310,11 +1310,19 @@ function pickDebugUpgradeTarget(network, upgrade) {
 function applyDebugBuild(world, config) {
   if (!config.grid) return;
   const network = world.resources.network;
+  const resetLens = UPGRADE_LIBRARY.find((u) => u.id === "resetLens");
+  
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     if (!config.grid[layer]) continue;
     for (let lane = 0; lane < LANE_COUNT; lane += 1) {
       const cellValue = config.grid[layer][lane];
-      if (cellValue) {
+      
+      // Always reset the node first in debug mode to allow clean application
+      if (resetLens) {
+        applyUpgrade(network, resetLens, { layer, lane });
+      }
+
+      if (cellValue && cellValue !== "clear") {
         const parts = cellValue.split(":");
         const upgradeId = parts[0];
         const targetLevel = Math.max(1, Number(parts[1]) || 1);
@@ -3264,7 +3272,8 @@ export function towerFireSystem(world, delta) {
   turret.chargeVisual = Math.max(0, (turret.chargeVisual || 0) * 0.72);
 
   if (combinedEffects.shield > 0) {
-    world.resources.run.shield = Math.min(8, world.resources.run.shield + combinedEffects.shield);
+    const shieldCap = hasLegendaryPerk(world.resources.run, "kinetic_buffer") ? 99 : 8;
+    world.resources.run.shield = Math.min(shieldCap, world.resources.run.shield + combinedEffects.shield);
   }
 }
 
