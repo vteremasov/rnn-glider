@@ -21,6 +21,17 @@ const REROLL_BASE_COST = {
   shop: 10,
 };
 
+const CAMP_EMPOWER_UPGRADE = {
+  id: "camp_empower",
+  name: "Empower Neuron",
+  short: "White +1",
+  description: "Permanently increases the base power of this neuron.",
+  color: "#ffffff",
+  icon: "★",
+  shape: "circle",
+  category: "camp",
+};
+
 function rerollCostFor(context, count, wave = 0) {
   const base = REROLL_BASE_COST[context] || 8;
   const scalingBase = base + Math.floor(wave * 1.5);
