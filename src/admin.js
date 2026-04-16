@@ -40,6 +40,13 @@ function randomId() {
 
 const DEFAULT_TASKS = [
   {
+  "id": "draft-1776359498632",
+  "title": "Corruption Node upgrade",
+  "notes": "If a non-boss enemy has <= 50% HP, this neuron burns their circuits, turning them into an ally that attacks other enemies. However, any signal passing through this neuron loses 50% of its power.",
+  "area": "combat",
+  "status": "idea"
+},
+  {
     id: randomId(),
     title: "Summon upgrade replaces Accelerator",
     notes: "Spawn allied copies from energized neurons instead of route fire-rate stacking.",
