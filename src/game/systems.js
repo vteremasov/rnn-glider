@@ -2114,6 +2114,22 @@ function splitWormBoss(world, entity, enemy) {
   world.destroyEntity(entity);
 }
 
+function weightedChoice(rng, items) {
+  if (!items || items.length === 0) {
+    return null;
+  }
+  const total = items.reduce((sum, item) => sum + (item.weight || 1), 0);
+  let roll = rng() * total;
+  for (let i = 0; i < items.length; i++) {
+    const weight = items[i].weight || 1;
+    if (roll < weight) {
+      return items[i];
+    }
+    roll -= weight;
+  }
+  return items[items.length - 1];
+}
+
 function summonKind(world) {
   const run = world.resources.run;
   const kinds = enemyKinds(run.wave, "combat", run.currentBranchTheme, run);

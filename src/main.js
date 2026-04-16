@@ -223,16 +223,39 @@ function populateDevPanel() {
   }
 
   devPalette.innerHTML = "";
+  let activeUpgradeId = null;
+
   for (const upgrade of UPGRADE_LIBRARY) {
     const item = document.createElement("div");
     item.className = "devtools-drag-item";
     item.draggable = true;
     item.textContent = upgrade.short || upgrade.name;
     item.dataset.upgradeId = upgrade.id;
+    
+    // Drag and Drop
     item.addEventListener("dragstart", (e) => {
       e.dataTransfer.setData("text/plain", upgrade.id);
       e.dataTransfer.effectAllowed = "copy";
     });
+
+    // Brush mode (Click to select)
+    item.addEventListener("click", () => {
+      const isSelected = item.classList.contains("is-selected");
+      // Clear previous selection
+      devPalette.querySelectorAll(".devtools-drag-item").forEach(el => {
+        el.classList.remove("is-selected");
+        el.style.borderColor = "";
+      });
+      
+      if (isSelected) {
+        activeUpgradeId = null;
+      } else {
+        item.classList.add("is-selected");
+        item.style.borderColor = "#00e5ff";
+        activeUpgradeId = upgrade.id;
+      }
+    });
+
     devPalette.appendChild(item);
   }
 
@@ -244,13 +267,16 @@ function populateDevPanel() {
       if (upgrade) {
         cell.textContent = `${upgrade.short || upgrade.name} ${parts[1]}`;
         cell.style.color = upgrade.color || "#eef1f6";
+        cell.style.fontWeight = "bold";
       } else {
         cell.textContent = "-";
         cell.style.color = "";
+        cell.style.fontWeight = "normal";
       }
     } else {
       cell.textContent = "-";
       cell.style.color = "";
+      cell.style.fontWeight = "normal";
     }
   }
 
@@ -282,16 +308,26 @@ function populateDevPanel() {
           renderGridCell(layer, lane, cell);
         }
       });
+
       cell.addEventListener("click", () => {
-        if (!devState.grid || !devState.grid[layer] || !devState.grid[layer][lane]) return;
-        const current = devState.grid[layer][lane];
-        const parts = current.split(":");
-        const upgradeId = parts[0];
-        let level = Number(parts[1]) || 1;
-        if (level >= 3) {
-          devState.grid[layer][lane] = "";
+        if (!devState.grid) devState.grid = [];
+        if (!devState.grid[layer]) devState.grid[layer] = [];
+
+        if (activeUpgradeId) {
+          // If we have a brush selected, apply it
+          devState.grid[layer][lane] = `${activeUpgradeId}:1`;
         } else {
-          devState.grid[layer][lane] = `${upgradeId}:${level + 1}`;
+          // Normal cycle behavior
+          if (!devState.grid[layer][lane]) return;
+          const current = devState.grid[layer][lane];
+          const parts = current.split(":");
+          const upgradeId = parts[0];
+          let level = Number(parts[1]) || 1;
+          if (level >= 3) {
+            devState.grid[layer][lane] = "";
+          } else {
+            devState.grid[layer][lane] = `${upgradeId}:${level + 1}`;
+          }
         }
         saveDevState();
         renderGridCell(layer, lane, cell);
