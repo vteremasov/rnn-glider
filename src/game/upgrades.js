@@ -11,6 +11,9 @@ const EFFECT_STEP = {
   overdrive: 1.2,
   summon: 1,
   corruption: 1,
+  glass_cannon: 1,
+  overclocked_core: 1,
+  unstable_prism: 1,
 };
 
 const TOPOLOGY_IDS = new Set(["leftLink", "rightLink", "divider", "merger", "relay"]);
@@ -28,6 +31,12 @@ export const UPGRADE_LIBRARY = [
   { id: "overdrive", name: "Overdrive", short: "+120% damage/status", description: "Boosts route damage and applied status strength by +120% per stack.", category: "energy", rewardWeight: 1, color: "#59f5d6", icon: "+", shape: "hex" },
   { id: "summon", name: "Summon Node", short: "+1 summon copy", description: "Whenever signal passes this neuron, summon an allied copy in that lane that rushes upward and explodes for its own HP on impact.", category: "energy", rewardWeight: 0.9, color: "#8fd8ff", icon: "^", shape: "hex" },
   { id: "corruption", name: "Corruption Node", short: "50% power, capture enemies", description: "If signal passes here, it captures non-boss enemies at <= 50% HP. Signal power passing through this neuron is halved.", category: "energy", rewardWeight: 0.4, color: "#39ff14", icon: "X", shape: "hex" },
+  
+  // Temporal Upgrades
+  { id: "glass_cannon", name: "Glass Cannon", short: "x5 Damage, Fragile", description: "TEMPORAL: Multiplies signal power by 5. Lasts 3 battles. When broken, divides power by 5.", category: "energy", rewardWeight: 0.3, color: "#e0f7fa", icon: "G", shape: "hex", durability: 3 },
+  { id: "overclocked_core", name: "Overclocked Core", short: "x3 Damage, Hot", description: "TEMPORAL: Boosts power by 300%. Lasts 3 battles. When broken, node absorbs 50% of signal.", category: "energy", rewardWeight: 0.3, color: "#ffeb3b", icon: "O", shape: "hex", durability: 3 },
+  { id: "unstable_prism", name: "Unstable Prism", short: "+1 Split, Unstable", description: "TEMPORAL: Adds +1 Split. Lasts 3 battles. When broken, has 50% chance to void the signal.", category: "energy", rewardWeight: 0.3, color: "#e1bee7", icon: "P", shape: "hex", durability: 3 },
+
   { id: "leftLink", name: "Left Link", short: "+~85% left branch", description: "Adds a strong branch: about 85% extra signal into the left neuron of the next layer.", category: "topology", rewardWeight: 0.9, color: "#ffb37f", icon: "L", shape: "triangle" },
   { id: "rightLink", name: "Right Link", short: "+~85% right branch", description: "Adds a strong branch: about 85% extra signal into the right neuron of the next layer.", category: "topology", rewardWeight: 0.9, color: "#ffb37f", icon: "R", shape: "triangle" },
   { id: "divider", name: "Divider", short: "split sideways", description: "Copies charge sideways into left and right neighbors.", category: "topology", rewardWeight: 0.8, color: "#ffd67f", icon: "D", shape: "triangle" },
@@ -124,6 +133,8 @@ export function applyUpgrade(state, upgrade, target) {
       node.links[linkKey] = 0;
     }
     node.appearance = null;
+    node.durability = null;
+    node.isBroken = false;
     return { applied: true, reset: true, level: 0, merged: false };
   }
 
@@ -135,6 +146,12 @@ export function applyUpgrade(state, upgrade, target) {
     level: currentLevel + 1,
   };
   node.power += 1;
+
+  // Handle temporal durability
+  if (upgrade.durability) {
+    node.durability = upgrade.durability;
+    node.isBroken = false;
+  }
 
   if (upgrade.id === "leftLink") {
     node.links.left += 1;

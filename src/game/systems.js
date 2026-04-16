@@ -1393,6 +1393,22 @@ export function applyDebugScenario(world, config = {}) {
 
 function completeMapRoom(world) {
   const run = world.resources.run;
+  const network = world.resources.network;
+  
+  // Temporal Upgrades: Reduce durability
+  for (let layer = 0; layer < NETWORK_LAYERS; layer++) {
+    for (let lane = 0; lane < LANE_COUNT; lane++) {
+      const node = network.nodes[layer][lane];
+      if (node.durability !== null && typeof node.durability === "number") {
+        node.durability -= 1;
+        if (node.durability <= 0) {
+          node.durability = 0;
+          node.isBroken = true;
+        }
+      }
+    }
+  }
+
   const node = mapNodeById(run, run.activeMapNodeId);
   if (!node) {
     openMap(world);
@@ -4755,11 +4771,30 @@ function drawNeuronNode(ctx, x, y, radius, node, activeAlpha, selected = false) 
       pathUpgradeShape(ctx, visual.shape, x, y, radius * (0.76 + nodeIntensity * 0.06));
       ctx.fill();
     }
-    ctx.strokeStyle = visual.color;
+    ctx.strokeStyle = node.isBroken ? "#555555" : visual.color;
     ctx.lineWidth = (selected ? 3.6 : 3) + nodeIntensity * 0.5 + (visualLevel - 1) * 0.35 + signalGlow * 0.4;
     pathUpgradeShape(ctx, visual.shape, x, y, radius * 1.02);
     ctx.stroke();
-    drawUpgradeGlyph(ctx, visual.id || visual.icon, x, y, radius * 0.92, "#f7fffd");
+    
+    drawUpgradeGlyph(ctx, visual.id || visual.icon, x, y, radius * 0.92, node.isBroken ? "#888888" : "#f7fffd");
+    
+    // Broken Cracks Visual
+    if (node.isBroken) {
+      ctx.strokeStyle = "rgba(0,0,0,0.42)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - radius * 0.4, y - radius * 0.4);
+      ctx.lineTo(x + radius * 0.4, y + radius * 0.4);
+      ctx.moveTo(x + radius * 0.4, y - radius * 0.4);
+      ctx.lineTo(x - radius * 0.4, y + radius * 0.4);
+      ctx.stroke();
+    }
+
+    // Durability Counter
+    if (node.durability !== null && typeof node.durability === "number") {
+      drawText(ctx, String(node.durability), x - radius * 0.72, y + radius * 0.76, 11, node.isBroken ? "#ff4d4d" : "#ffffff", "center");
+    }
+
     for (let pip = 1; pip < visualLevel; pip += 1) {
       const pipX = x + radius * 0.64;
       const pipY = y - radius * 0.62 + (pip - 1) * radius * 0.34;

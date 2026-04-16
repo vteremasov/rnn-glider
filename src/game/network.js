@@ -496,6 +496,20 @@ function propagateLayer(incoming, state, layerIndex) {
       localSignal *= 0.5;
     }
 
+    // Temporal Upgrades Logic
+    if (node.appearance) {
+      const isBroken = !!node.isBroken;
+      if (node.appearance.id === "glass_cannon") {
+        localSignal *= isBroken ? (1 / 5) : 5;
+      } else if (node.appearance.id === "overclocked_core") {
+        localSignal *= isBroken ? 0.5 : 3;
+      } else if (node.appearance.id === "unstable_prism") {
+        if (isBroken && Math.random() < 0.5) {
+          localSignal = 0;
+        }
+      }
+    }
+
     const retained = localSignal * (state.signalRetention + node.links.relay * 0.08);
     next[lane] += retained;
     flows.forward[lane] += retained;
