@@ -3251,14 +3251,12 @@ export function towerFireSystem(world, delta) {
   turret.pendingShot = null;
   const combinedEffects = {};
   const sourceLane = typeof shot.sourceLane === "number" ? shot.sourceLane : shot.lane;
-  for (const key of Object.keys(network.nodes[0][sourceLane].effects)) {
-    combinedEffects[key] = 0;
-  }
+  
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     const lane = layer === 0 ? sourceLane : shot.lane;
     const node = network.nodes[layer][lane];
     for (const key of Object.keys(node.effects)) {
-      combinedEffects[key] += node.effects[key] || 0;
+      combinedEffects[key] = (combinedEffects[key] || 0) + (node.effects[key] || 0);
     }
   }
   if (typeof shot.overdrive === "number") {

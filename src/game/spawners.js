@@ -95,6 +95,7 @@ export function createProjectile(world, lane, x, y, targetId, payload) {
     slow: payload.slow,
     freeze: payload.freeze,
     pushback: payload.pushback,
+    corruption: payload.corruption || 0,
     hitIds: [],
   });
   return entity;
