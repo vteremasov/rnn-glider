@@ -3063,6 +3063,26 @@ export function inputSystem(world) {
       openCampEmpower(world);
       return;
     }
+    if (hit.action === "camp_cleanse") {
+      world.resources.phase.name = "camp_cleanse";
+      return;
+    }
+    return;
+  }
+
+  if (phase.name === "camp_cleanse") {
+    if (hit.action === "cancel_camp_cleanse") {
+      world.resources.phase.name = "camp";
+      return;
+    }
+    if (hit.target) {
+      const resetLens = UPGRADE_LIBRARY.find(u => u.id === "resetLens");
+      if (resetLens) {
+        applyUpgrade(world.resources.network, resetLens, hit.target);
+        createFlash(world, laneCenterX(world.resources.layout, hit.target.lane), networkLayerY(world.resources.layout, hit.target.layer), "#ff4d4d", 60);
+      }
+      completeMapRoom(world);
+    }
     return;
   }
 
