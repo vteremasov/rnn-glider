@@ -27,6 +27,7 @@ const AUTO_DONE_TITLES = new Set([
   "Add paid upgrade rerolls",
   "Add legendary that unlocks shield cap",
   "Shield should inherit the last routed upgrade",
+  "Corruption Node upgrade",
 ]);
 
 function randomId() {

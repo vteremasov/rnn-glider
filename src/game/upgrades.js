@@ -10,6 +10,7 @@ const EFFECT_STEP = {
   shield: 1,
   overdrive: 1.2,
   summon: 1,
+  corruption: 1,
 };
 
 const TOPOLOGY_IDS = new Set(["leftLink", "rightLink", "divider", "merger", "relay"]);
@@ -26,6 +27,7 @@ export const UPGRADE_LIBRARY = [
   { id: "shield", name: "Shield Relay", short: "+1 shield", description: "Successful hit can restore +1 shield.", category: "utility", rewardWeight: 0.7, color: "#8ec8ff", icon: "U", shape: "square" },
   { id: "overdrive", name: "Overdrive", short: "+120% damage/status", description: "Boosts route damage and applied status strength by +120% per stack.", category: "energy", rewardWeight: 1, color: "#59f5d6", icon: "+", shape: "hex" },
   { id: "summon", name: "Summon Node", short: "+1 summon copy", description: "Whenever signal passes this neuron, summon an allied copy in that lane that rushes upward and explodes for its own HP on impact.", category: "energy", rewardWeight: 0.9, color: "#8fd8ff", icon: "^", shape: "hex" },
+  { id: "corruption", name: "Corruption Node", short: "50% power, capture enemies", description: "If signal passes here, it captures non-boss enemies at <= 50% HP. Signal power passing through this neuron is halved.", category: "energy", rewardWeight: 0.4, color: "#39ff14", icon: "X", shape: "hex" },
   { id: "leftLink", name: "Left Link", short: "+~85% left branch", description: "Adds a strong branch: about 85% extra signal into the left neuron of the next layer.", category: "topology", rewardWeight: 0.9, color: "#ffb37f", icon: "L", shape: "triangle" },
   { id: "rightLink", name: "Right Link", short: "+~85% right branch", description: "Adds a strong branch: about 85% extra signal into the right neuron of the next layer.", category: "topology", rewardWeight: 0.9, color: "#ffb37f", icon: "R", shape: "triangle" },
   { id: "divider", name: "Divider", short: "split sideways", description: "Copies charge sideways into left and right neighbors.", category: "topology", rewardWeight: 0.8, color: "#ffd67f", icon: "D", shape: "triangle" },

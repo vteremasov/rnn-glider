@@ -2227,6 +2227,23 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
   if (remainingDamage > 0) {
     createDamageText(world, contactX, contactY - enemy.radius * 0.2, Math.max(1, Math.round(remainingDamage)));
   }
+
+  // Corruption Capture Logic
+  if (projectile.corruption > 0 && !enemy.boss && !enemy.isAlly) {
+    const maxHp = enemy.maxHp || (enemy.reward > 10 ? enemy.hp * 2 : enemy.hp); // Fallback for maxHp
+    if (enemy.hp <= maxHp * 0.5) {
+      enemy.isAlly = true;
+      enemy.tint = "#39ff14"; // Neon Green
+      enemy.speed = Math.max(enemy.speed, 50); // Make them move at a decent speed
+      createFlash(world, contactX, contactY, "#39ff14", enemy.radius * 2.5, {
+        style: "shock",
+        accent: "#ffffff",
+        life: 0.45
+      });
+      createDamageText(world, contactX, contactY - enemy.radius * 0.5, "CORRUPTED", "#39ff14");
+    }
+  }
+
   const burnRule = PERIODIC_STATUS_RULES.burn;
   const curseRule = PERIODIC_STATUS_RULES.curse;
   if (projectile.burn > 0) {
@@ -3262,6 +3279,7 @@ export function towerFireSystem(world, delta) {
     slow: combinedEffects.slow * 0.85 * statusScale,
     freeze: combinedEffects.freeze * 1.6 * statusScale,
     pushback: combinedEffects.pushback * 18 * statusScale,
+    corruption: combinedEffects.corruption || 0,
   });
   createFlash(world, muzzle.x, muzzle.y, COLORS.energyBright, 34);
   createFlash(world, layout.turretX, layout.turretY, COLORS.energy, 20);
@@ -3394,9 +3412,52 @@ export function enemyMovementSystem(world, delta) {
       const maxOffset = layout.gridX + layout.gridWidth - enemy.radius - laneX;
       enemy.xOffset = clamp(enemy.xOffset || 0, minOffset, maxOffset);
       const verticalSpeedScale = enemy.boss ? 0.78 : 1;
-      enemy.y += enemy.speed * verticalSpeedScale * slowMultiplier * delta;
-      enemy.y -= push * delta;
+      
+      if (enemy.isAlly) {
+        // Move UP
+        enemy.y -= enemy.speed * 1.2 * slowMultiplier * delta;
+      } else {
+        // Normal move DOWN
+        enemy.y += enemy.speed * verticalSpeedScale * slowMultiplier * delta;
+        enemy.y -= push * delta;
+      }
+      
       enemy.y = Math.max(layout.fieldTop + enemy.radius + layout.cell * 0.2, enemy.y);
+    }
+
+    if (enemy.isAlly) {
+      // Ally Collision with Enemies
+      const enemyX = enemyScreenX(layout, enemy);
+      for (const otherId of world.query("enemy")) {
+        if (otherId === entity) continue;
+        const other = world.getComponent(otherId, "enemy");
+        if (!other || other.isAlly) continue;
+        
+        const otherX = enemyScreenX(layout, other);
+        const dist = Math.hypot(enemyX - otherX, enemy.y - other.y);
+        if (dist < enemy.radius + other.radius) {
+          // Clash!
+          const clashDmg = Math.max(1, enemy.hp);
+          other.hp -= clashDmg;
+          enemy.hp -= 2; // Allies are fragile
+          
+          other.hitFlash = 0.2;
+          enemy.hitFlash = 0.2;
+          
+          createFlash(world, (enemyX + otherX) / 2, (enemy.y + other.y) / 2, "#39ff14", 30, { style: "burst" });
+          createDamageText(world, otherX, other.y, Math.round(clashDmg), "#39ff14");
+          
+          // Small knockback
+          other.pushImpulse = Math.max(other.pushImpulse || 0, 15);
+          break;
+        }
+      }
+      
+      // Allied cleanup if they go off screen top
+      if (enemy.y < layout.fieldTop - 50) {
+        world.destroyEntity(entity);
+        continue;
+      }
     }
 
     if (enemy.hp <= 0) {

@@ -489,7 +489,13 @@ function propagateLayer(incoming, state, layerIndex) {
 
   for (let lane = 0; lane < LANE_COUNT; lane += 1) {
     const node = state.nodes[layerIndex][lane];
-    const localSignal = lateral[lane] * (1 + node.power * 0.18);
+    let localSignal = lateral[lane] * (1 + node.power * 0.18);
+    
+    // Corruption penalty
+    if (node.effects.corruption > 0) {
+      localSignal *= 0.5;
+    }
+
     const retained = localSignal * (state.signalRetention + node.links.relay * 0.08);
     next[lane] += retained;
     flows.forward[lane] += retained;
