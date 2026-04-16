@@ -24,6 +24,7 @@ const AUTO_DONE_TITLES = new Set([
   "Camp should offer heal or neuron upgrade",
   "Scrollable route map camera",
   "Enemy reactive resist profiles",
+  "Add paid upgrade rerolls",
 ]);
 
 function randomId() {
@@ -104,7 +105,7 @@ const DEFAULT_TASKS = [
     title: "Add paid upgrade rerolls",
     notes: "Let the player reroll offered upgrades by spending money during reward/shop flows.",
     area: "economy",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),
