@@ -41,6 +41,20 @@ function randomId() {
 
 const DEFAULT_TASKS = [
   {
+  "id": "draft-temp-1776368189446",
+  "title": "Temporary powerful upgrades",
+  "notes": "Introduce high-power upgrades that last only 3 battles, then become useless or harmful. Player must decide when to use them and how to remove them later.",
+  "area": "content",
+  "status": "idea"
+},
+  {
+  "id": "draft-rem-1776368189446",
+  "title": "Upgrade removal mechanic",
+  "notes": "Add a way to remove an upgrade from a neuron (Camp option, Shop service, or Reward choice). Required for managing inventory and temporary buffs.",
+  "area": "content",
+  "status": "idea"
+},
+  {
   "id": "draft-1776359498632",
   "title": "Corruption Node upgrade",
   "notes": "If a non-boss enemy has <= 50% HP, this neuron burns their circuits, turning them into an ally that attacks other enemies. However, any signal passing through this neuron loses 50% of its power.",

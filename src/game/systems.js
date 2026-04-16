@@ -3418,9 +3418,9 @@ export function enemyMovementSystem(world, delta) {
         // Normal move DOWN
         enemy.y += enemy.speed * verticalSpeedScale * slowMultiplier * delta;
         enemy.y -= push * delta;
+        // Only clamp Y for enemies, not allies going UP
+        enemy.y = Math.max(layout.fieldTop + enemy.radius + layout.cell * 0.2, enemy.y);
       }
-      
-      enemy.y = Math.max(layout.fieldTop + enemy.radius + layout.cell * 0.2, enemy.y);
     }
 
     if (enemy.isAlly) {
