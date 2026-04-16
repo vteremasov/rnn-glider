@@ -201,6 +201,8 @@ if (!devState || !devState.grid) {
   devState = defaultDevState();
 }
 
+let activeUpgradeId = null;
+
 function populateDevPanel() {
   if (!devRequested || !devToggle || !devPanel || !devDepth || !devUpgrades || !devLegendary || !devPalette) {
     return;
@@ -223,7 +225,36 @@ function populateDevPanel() {
   }
 
   devPalette.innerHTML = "";
-  let activeUpgradeId = null;
+  activeUpgradeId = null; // Reset brush when repopulating
+
+  // Add "Clear" brush first
+  const clearItem = document.createElement("div");
+  clearItem.className = "devtools-drag-item is-clear";
+  clearItem.draggable = true;
+  clearItem.textContent = "CLEAR";
+  clearItem.dataset.upgradeId = "clear";
+  clearItem.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/plain", "clear");
+    e.dataTransfer.effectAllowed = "copy";
+  });
+  clearItem.addEventListener("click", () => {
+    const isSelected = clearItem.classList.contains("is-selected");
+    
+    // UI: Clear previous selection on all
+    devPalette.querySelectorAll(".devtools-drag-item").forEach(el => {
+      el.classList.remove("is-selected");
+      el.style.borderColor = "";
+    });
+    
+    if (isSelected) {
+      activeUpgradeId = null;
+    } else {
+      clearItem.classList.add("is-selected");
+      clearItem.style.borderColor = "#ff4d4d";
+      activeUpgradeId = "clear";
+    }
+  });
+  devPalette.appendChild(clearItem);
 
   for (const upgrade of UPGRADE_LIBRARY) {
     const item = document.createElement("div");
@@ -241,7 +272,8 @@ function populateDevPanel() {
     // Brush mode (Click to select)
     item.addEventListener("click", () => {
       const isSelected = item.classList.contains("is-selected");
-      // Clear previous selection
+      
+      // UI: Clear previous selection on all
       devPalette.querySelectorAll(".devtools-drag-item").forEach(el => {
         el.classList.remove("is-selected");
         el.style.borderColor = "";
@@ -303,7 +335,7 @@ function populateDevPanel() {
         if (upgradeId) {
           if (!devState.grid) devState.grid = [];
           if (!devState.grid[layer]) devState.grid[layer] = [];
-          devState.grid[layer][lane] = `${upgradeId}:1`;
+          devState.grid[layer][lane] = upgradeId === "clear" ? "" : `${upgradeId}:1`;
           saveDevState();
           renderGridCell(layer, lane, cell);
         }
@@ -313,11 +345,25 @@ function populateDevPanel() {
         if (!devState.grid) devState.grid = [];
         if (!devState.grid[layer]) devState.grid[layer] = [];
 
-        if (activeUpgradeId) {
-          // If we have a brush selected, apply it
-          devState.grid[layer][lane] = `${activeUpgradeId}:1`;
+        if (activeUpgradeId === "clear") {
+          devState.grid[layer][lane] = "";
+        } else if (activeUpgradeId) {
+          const current = devState.grid[layer][lane] || "";
+          const parts = current.split(":");
+          if (parts[0] === activeUpgradeId) {
+            // Increment level if same upgrade
+            let level = Number(parts[1]) || 1;
+            if (level >= 3) {
+              devState.grid[layer][lane] = "";
+            } else {
+              devState.grid[layer][lane] = `${activeUpgradeId}:${level + 1}`;
+            }
+          } else {
+            // Replace with new upgrade
+            devState.grid[layer][lane] = `${activeUpgradeId}:1`;
+          }
         } else {
-          // Normal cycle behavior
+          // Normal cycle behavior without brush
           if (!devState.grid[layer][lane]) return;
           const current = devState.grid[layer][lane];
           const parts = current.split(":");

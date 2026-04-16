@@ -26,6 +26,7 @@ const AUTO_DONE_TITLES = new Set([
   "Enemy reactive resist profiles",
   "Add paid upgrade rerolls",
   "Add legendary that unlocks shield cap",
+  "Shield should inherit the last routed upgrade",
 ]);
 
 function randomId() {
@@ -148,7 +149,7 @@ const DEFAULT_TASKS = [
     title: "Shield should inherit the last routed upgrade",
     notes: "The player's shield should take on the last routed upgrade effect as a single active imbue, but only one shield upgrade effect at a time.",
     area: "combat",
-    status: "idea",
+    status: "done",
   },
   {
     id: randomId(),

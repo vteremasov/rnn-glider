@@ -3273,7 +3273,23 @@ export function towerFireSystem(world, delta) {
 
   if (combinedEffects.shield > 0) {
     const shieldCap = hasLegendaryPerk(world.resources.run, "kinetic_buffer") ? 99 : 8;
+    const oldShield = world.resources.run.shield;
     world.resources.run.shield = Math.min(shieldCap, world.resources.run.shield + combinedEffects.shield);
+    
+    // Update shield imbue if we actually gained shield or if the shot has status effects
+    const statuses = [
+      { id: "fire", val: combinedEffects.fire },
+      { id: "curse", val: combinedEffects.curse },
+      { id: "slow", val: combinedEffects.slow },
+      { id: "freeze", val: combinedEffects.freeze }
+    ];
+    statuses.sort((a, b) => b.val - a.val);
+    if (statuses[0].val > 0) {
+      world.resources.run.shieldImbue = statuses[0].id;
+    } else if (oldShield <= 0) {
+      // Clear imbue if starting from scratch with a "clean" shot
+      world.resources.run.shieldImbue = null;
+    }
   }
 }
 
@@ -3405,6 +3421,20 @@ export function enemyMovementSystem(world, delta) {
       run.shieldHitFlash = 1;
       createDamageText(world, 86, 64, "-1", "#8fd8ff");
       enemy.hp -= 1;
+      
+      // Shield Imbue Thorns
+      if (run.shieldImbue === "fire") {
+        enemy.status.burn = Math.min(PERIODIC_STATUS_RULES.burn.cap, (enemy.status.burn || 0) + 2.4);
+        enemy.burnHold = Math.max(enemy.burnHold || 0, PERIODIC_STATUS_RULES.burn.hold);
+      } else if (run.shieldImbue === "curse") {
+        enemy.status.curse = Math.min(PERIODIC_STATUS_RULES.curse.cap, (enemy.status.curse || 0) + 1.8);
+        enemy.curseHold = Math.max(enemy.curseHold || 0, PERIODIC_STATUS_RULES.curse.hold);
+      } else if (run.shieldImbue === "slow") {
+        enemy.status.slow = Math.max(enemy.status.slow || 0, 0.45);
+      } else if (run.shieldImbue === "freeze") {
+        enemy.status.freeze = Math.max(enemy.status.freeze || 0, 0.65);
+      }
+
       enemy.hitFlash = Math.max(enemy.hitFlash || 0, 0.14);
       enemy.pushImpulse = Math.max(enemy.pushImpulse, enemy.radius * 1.4 * (enemy.pushbackResistance || 1));
       enemy.shieldTouchCooldown = 0.16;
@@ -5296,15 +5326,23 @@ function drawCombatScene(world, ctx) {
     const renderRy = shieldRy * (0.42 + shieldAppear * 0.58);
     const renderHighlightY = rimY - (rimY - highlightY) * shieldAppear;
     
+    let imbueColor = [120, 212, 255]; // Default Blue
+    if (run.shieldImbue === "fire") imbueColor = [255, 130, 86];
+    else if (run.shieldImbue === "curse") imbueColor = [203, 140, 255];
+    else if (run.shieldImbue === "slow") imbueColor = [116, 213, 255];
+    else if (run.shieldImbue === "freeze") imbueColor = [182, 244, 255];
+
+    const baseColor = `rgba(${imbueColor[0]}, ${imbueColor[1]}, ${imbueColor[2]}`;
+
     const fillAlpha = (0.07 + pulse * 0.1 + hitFlash * 0.2) * shieldAppear;
     const glowAlpha = (0.2 + pulse * 0.15 + hitFlash * 0.25) * shieldAppear;
     const rimAlpha = (0.3 + pulse * 0.2 + hitFlash * 0.5) * shieldAppear;
     const lowerAlpha = (0.2 + pulse * 0.1 + hitFlash * 0.2) * shieldAppear;
 
-    ctx.shadowColor = "rgba(120, 212, 255, 0.5)";
+    ctx.shadowColor = `${baseColor}, 0.5)`;
     ctx.shadowBlur = layout.cell * 0.4 * shieldAppear;
 
-    ctx.fillStyle = `rgba(120, 212, 255, ${fillAlpha})`;
+    ctx.fillStyle = `${baseColor}, ${fillAlpha})`;
     ctx.beginPath();
     ctx.ellipse(shieldCx, rimY, renderRx, renderRy, 0, Math.PI, 0);
     ctx.lineTo(layout.gridX + layout.gridWidth - shieldInset, rimY + layout.cell * 0.26);
@@ -5316,7 +5354,7 @@ function drawCombatScene(world, ctx) {
 
     const shieldGradient = ctx.createLinearGradient(0, shieldY - domeHeight * 0.82, 0, rimY + layout.cell * 0.26);
     shieldGradient.addColorStop(0, `rgba(224, 248, 255, ${glowAlpha})`);
-    shieldGradient.addColorStop(0.45, `rgba(130, 214, 255, ${(0.14 + pulse * 0.1 + hitFlash * 0.22) * shieldAppear})`);
+    shieldGradient.addColorStop(0.45, `${baseColor}, ${(0.14 + pulse * 0.1 + hitFlash * 0.22) * shieldAppear})`);
     shieldGradient.addColorStop(1, `rgba(64, 150, 220, ${(0.04 + pulse * 0.04 + hitFlash * 0.12) * shieldAppear})`);
     ctx.fillStyle = shieldGradient;
     ctx.beginPath();
@@ -5326,7 +5364,7 @@ function drawCombatScene(world, ctx) {
     ctx.closePath();
     ctx.fill();
 
-    ctx.strokeStyle = `rgba(210, 244, 255, ${rimAlpha})`;
+    ctx.strokeStyle = `${baseColor}, ${rimAlpha})`;
     ctx.lineWidth = Math.max(2.0, layout.cell * 0.1);
     ctx.beginPath();
     ctx.ellipse(shieldCx, renderHighlightY, renderRx * 0.94, renderRy * 0.86, 0, Math.PI, 0);
@@ -5334,13 +5372,13 @@ function drawCombatScene(world, ctx) {
 
     const scanlineY = (world.resources.frameIndex * 0.02) % 1;
     const scanAlpha = (0.15 + pulse * 0.1) * shieldAppear * Math.sin(scanlineY * Math.PI);
-    ctx.strokeStyle = `rgba(180, 240, 255, ${scanAlpha})`;
+    ctx.strokeStyle = `${baseColor}, ${scanAlpha})`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.ellipse(shieldCx, renderHighlightY + renderRy * 0.6 * (scanlineY - 0.5), renderRx * 0.8, renderRy * 0.1, 0, Math.PI, 0);
     ctx.stroke();
 
-    ctx.strokeStyle = `rgba(95, 194, 255, ${lowerAlpha})`;
+    ctx.strokeStyle = `${baseColor}, ${lowerAlpha})`;
     ctx.lineWidth = Math.max(1.2, layout.cell * 0.06);
     ctx.beginPath();
     ctx.ellipse(shieldCx, rimY + layout.cell * 0.06, renderRx, renderRy * 0.28, 0, 0, Math.PI);
@@ -6214,7 +6252,14 @@ function drawCombatScene(world, ctx) {
     ctx.fillStyle = "rgba(255,255,255,0.08)";
     pathRoundedRect(ctx, panelX, panelY + 30, barW, barH, 4);
     ctx.fill();
-    ctx.fillStyle = "#8fd8ff";
+    
+    let imbueColor = "#8fd8ff"; // Default Blue
+    if (run.shieldImbue === "fire") imbueColor = "#ff8256";
+    else if (run.shieldImbue === "curse") imbueColor = "#cb8cff";
+    else if (run.shieldImbue === "slow") imbueColor = "#74d5ff";
+    else if (run.shieldImbue === "freeze") imbueColor = "#b6f4ff";
+    
+    ctx.fillStyle = imbueColor;
     pathRoundedRect(ctx, panelX, panelY + 30, barW * clamp(run.shield / 8, 0, 1), barH, 4);
     ctx.fill();
     drawText(ctx, `Shield ${run.shield}`, panelX, panelY + 50, 14, COLORS.textDim);
