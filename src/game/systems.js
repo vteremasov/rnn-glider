@@ -3403,6 +3403,7 @@ export function enemyMovementSystem(world, delta) {
 
   run.baseHitFlash = Math.max(0, (run.baseHitFlash || 0) - delta * 1.7);
   run.shieldHitFlash = Math.max(0, (run.shieldHitFlash || 0) - delta * 2);
+  run.invulnTimer = Math.max(0, (run.invulnTimer || 0) - delta);
 
   const fireDotMultiplier = 1 + ((run.legendaryBattle && run.legendaryBattle.fireFromFreezeBonus) || 0);
   const curseDotMultiplier = 1 + ((run.legendaryBattle && run.legendaryBattle.curseFromSlowBonus) || 0);
@@ -3608,16 +3609,27 @@ export function enemyMovementSystem(world, delta) {
     }
 
     if (collidedBase) {
-      if (enemy.elite || enemy.boss) {
-        run.shield = 0;
-        run.baseHp = 0;
-        run.baseHitFlash = 1;
-        createDamageText(world, 102, 42, "CORE BREACH", "#ff8f7d");
-      } else {
-        run.baseHp -= enemy.damage;
-        run.baseHitFlash = 1;
-        createDamageText(world, 86, 34, `-${enemy.damage}`, "#ff8f7d");
+      if ((run.invulnTimer || 0) <= 0) {
+        if (enemy.elite || enemy.boss) {
+          if (run.baseHp > 1) {
+            run.baseHp = 1;
+            run.invulnTimer = 1.6; // Give breathing room
+            run.baseHitFlash = 1.2;
+            createDamageText(world, 102, 42, "SURVIVED", "#ffffff");
+          } else {
+            run.baseHp = 0;
+            run.baseHitFlash = 1.5;
+            createDamageText(world, 102, 42, "CORE BREACH", "#ff8f7d");
+          }
+          run.shield = 0;
+        } else {
+          run.baseHp -= enemy.damage;
+          run.baseHitFlash = 1;
+          run.invulnTimer = 0.4; // Small grace period
+          createDamageText(world, 86, 34, `-${enemy.damage}`, "#ff8f7d");
+        }
       }
+      
       createFlash(world, enemyX, layout.baseLineY, COLORS.threat, 38, {
         style: "shock",
         accent: "rgba(255, 232, 220, 0.62)",
@@ -5551,6 +5563,10 @@ function drawCombatScene(world, ctx) {
 
   if (!quietBackdrop) {
     ctx.fillStyle = "#352f38";
+    if ((run.invulnTimer || 0) > 0) {
+      const flash = Math.sin(performance.now() * 0.02) * 0.15 + 0.15;
+      ctx.fillStyle = `rgba(255, 60, 60, ${0.1 + flash})`;
+    }
     ctx.fillRect(layout.gridX, layout.baseLineY, layout.gridWidth, uiScale * 0.45);
   }
 
@@ -7151,6 +7167,7 @@ export function resetRun(world, restoredProgress = null, forcedSeed = null) {
     shieldAppearPulse: 0,
     baseHitFlash: 0,
     shieldHitFlash: 0,
+    invulnTimer: 0,
     moneyPickupFlash: 0,
     money: 18,
     score: 0,

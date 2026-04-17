@@ -30,6 +30,7 @@ const AUTO_DONE_TITLES = new Set([
   "Corruption Node upgrade",
   "Upgrade removal mechanic",
   "Temporary powerful upgrades",
+  "Boss hits should be survivable",
 ]);
 
 function randomId() {
