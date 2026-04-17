@@ -68,14 +68,14 @@ const DEFAULT_TASKS = [
     title: "Summon upgrade replaces Accelerator",
     notes: "Spawn allied copies from energized neurons instead of route fire-rate stacking.",
     area: "combat",
-    status: "doing",
+    status: "done",
   },
   {
     id: randomId(),
     title: "Improve text readability",
     notes: "Higher DPR plus stronger contrast for damage numbers and UI labels.",
     area: "ui",
-    status: "doing",
+    status: "done",
   },
   {
     id: randomId(),

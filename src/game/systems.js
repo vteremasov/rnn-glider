@@ -1892,35 +1892,53 @@ function commitUpgradeTarget(world, target) {
     if (!node) {
       return;
     }
-    node.power += 1;
+    
+    const isCleanse = pending.upgrade && pending.upgrade.id === "resetLens";
+    if (!isCleanse) {
+      node.power += 1;
+    }
+    
     world.resources.ui.neuronInspect = null;
     world.resources.ui.legendaryInspect = null;
     const layout = world.resources.layout;
     if (layout) {
-      createFlash(
-        world,
-        laneCenterX(layout, target.lane),
-        networkLayerY(layout, target.layer),
-        CAMP_EMPOWER_UPGRADE.color,
-        layout.cell * 1.1,
-        {
-          style: "merge",
-          accent: COLORS.energyBright,
-          life: 0.84,
-          upgradeId: CAMP_EMPOWER_UPGRADE.id,
-          icon: CAMP_EMPOWER_UPGRADE.icon,
-          shape: CAMP_EMPOWER_UPGRADE.shape,
-          level: Math.max(1, node.power || 1),
-        },
-      );
-      createDamageText(
-        world,
-        laneCenterX(layout, target.lane),
-        networkLayerY(layout, target.layer) - layout.cell * 0.48,
-        "White +1",
-        "#e7fbff",
-      );
+      if (isCleanse) {
+        createFlash(world, laneCenterX(layout, target.lane), networkLayerY(layout, target.layer), "#ff4d4d", layout.cell * 1.5, {
+          style: "shock",
+          accent: "#ffffff",
+          life: 0.8
+        });
+      } else {
+        createFlash(
+          world,
+          laneCenterX(layout, target.lane),
+          networkLayerY(layout, target.layer),
+          CAMP_EMPOWER_UPGRADE.color,
+          layout.cell * 1.1,
+          {
+            style: "merge",
+            accent: COLORS.energyBright,
+            life: 0.84,
+            upgradeId: CAMP_EMPOWER_UPGRADE.id,
+            icon: CAMP_EMPOWER_UPGRADE.icon,
+            shape: CAMP_EMPOWER_UPGRADE.shape,
+            level: Math.max(1, node.power || 1),
+          },
+        );
+        createDamageText(
+          world,
+          laneCenterX(layout, target.lane),
+          networkLayerY(layout, target.layer) - layout.cell * 0.48,
+          "White +1",
+          "#e7fbff",
+        );
+      }
     }
+
+    if (isCleanse) {
+      applyUpgrade(world.resources.network, pending.upgrade, target);
+    }
+    
     world.resources.ui.cards = [];
     world.resources.ui.pendingUpgrade = null;
     clearDragState(world.resources.ui);
@@ -2075,6 +2093,16 @@ function openCampEmpower(world) {
   openReward(world, {
     source: "camp",
     rewards: [CAMP_EMPOWER_UPGRADE],
+  });
+}
+
+function openCampCleanse(world) {
+  const resetLens = UPGRADE_LIBRARY.find(u => u.id === "resetLens");
+  if (!resetLens) return;
+  
+  openReward(world, {
+    source: "camp",
+    rewards: [resetLens],
   });
 }
 
@@ -2271,9 +2299,9 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
     enemy.curseHold = Math.max(enemy.curseHold || 0, curseRule.hold);
   }
   if (!shielded) {
-    enemy.status.slow = Math.max(enemy.status.slow, projectile.slow);
-    enemy.status.freeze = Math.max(enemy.status.freeze, projectile.freeze * 1.35);
-    enemy.pushImpulse = Math.max(enemy.pushImpulse, projectile.pushback * (enemy.pushbackResistance || 1));
+    enemy.status.slow = Math.max(enemy.status.slow || 0, projectile.slow);
+    enemy.status.freeze = Math.max(enemy.status.freeze || 0, projectile.freeze * 1.35);
+    enemy.pushImpulse = Math.max(enemy.pushImpulse || 0, projectile.pushback * (enemy.pushbackResistance || 1));
   }
 
   if (!shielded && projectile.freeze > 0 && hasLegendaryPerk(run, "thermal_feedback")) {
@@ -3024,6 +3052,27 @@ export function inputSystem(world) {
     }
     if (hit.action === "reroll_reward") {
       rerollUpgrades(world, "reward");
+      return;
+    }
+    if (hit.action === "reward_cleanse_start") {
+      openCampCleanse(world);
+      return;
+    }
+    return;
+  }
+
+  if (phase.name === "reward_cleanse") {
+    if (hit.action === "cancel_reward_cleanse") {
+      world.resources.phase.name = "reward_drag";
+      return;
+    }
+    if (hit.target) {
+      const resetLens = UPGRADE_LIBRARY.find(u => u.id === "resetLens");
+      if (resetLens) {
+        applyUpgrade(world.resources.network, resetLens, hit.target);
+        createFlash(world, laneCenterX(world.resources.layout, hit.target.lane), networkLayerY(world.resources.layout, hit.target.layer), "#ff4d4d", 60);
+      }
+      completeMapRoom(world);
     }
     return;
   }
@@ -3080,7 +3129,7 @@ export function inputSystem(world) {
       return;
     }
     if (hit.action === "camp_cleanse") {
-      world.resources.phase.name = "camp_cleanse";
+      openCampCleanse(world);
       return;
     }
     return;
@@ -3296,23 +3345,24 @@ export function towerFireSystem(world, delta) {
     }
   }
   if (typeof shot.overdrive === "number") {
-    combinedEffects.overdrive = Math.max(combinedEffects.overdrive, shot.overdrive);
+    combinedEffects.overdrive = Math.max(combinedEffects.overdrive || 0, shot.overdrive);
   }
-  const damageScale = 1 + combinedEffects.overdrive;
-  const statusScale = 1 + combinedEffects.overdrive;
+  const overdrive = combinedEffects.overdrive || 0;
+  const damageScale = 1 + overdrive;
+  const statusScale = 1 + overdrive;
   const muzzle = turretMuzzle(layout, turret.angle);
   const damage = Math.round(shot.damage * damageScale);
 
   createProjectile(world, shot.lane, muzzle.x, muzzle.y, bestTarget.entity, {
     damage,
-    pierce: combinedEffects.penetration,
-    split: combinedEffects.split,
-    ricochet: combinedEffects.ricochet,
-    burn: combinedEffects.fire * 2.4 * statusScale,
-    curse: combinedEffects.curse * 1.8 * statusScale,
-    slow: combinedEffects.slow * 0.85 * statusScale,
-    freeze: combinedEffects.freeze * 1.6 * statusScale,
-    pushback: combinedEffects.pushback * 18 * statusScale,
+    pierce: combinedEffects.penetration || 0,
+    split: combinedEffects.split || 0,
+    ricochet: combinedEffects.ricochet || 0,
+    burn: (combinedEffects.fire || 0) * 2.4 * statusScale,
+    curse: (combinedEffects.curse || 0) * 1.8 * statusScale,
+    slow: (combinedEffects.slow || 0) * 0.85 * statusScale,
+    freeze: (combinedEffects.freeze || 0) * 1.6 * statusScale,
+    pushback: (combinedEffects.pushback || 0) * 18 * statusScale,
     corruption: combinedEffects.corruption || 0,
   });
   createFlash(world, muzzle.x, muzzle.y, COLORS.energyBright, 34);
@@ -6654,6 +6704,19 @@ function drawOverlay(world, ctx) {
         );
         button(world, rewardRerollRect.x, rewardRerollRect.y, rewardRerollRect.width, rewardRerollRect.height, "Reroll", { action: "reroll_reward" });
       }
+
+      // Add "Cleanse Instead" button
+      if (!isCampReward) {
+        const rewardCleanseRect = {
+          x: trayRect.x + trayRect.width * 0.5 - 70,
+          y: trayRect.y + trayRect.height + 15,
+          width: 140,
+          height: 42
+        };
+        drawPillButton(ctx, rewardCleanseRect, true);
+        drawText(ctx, "Cleanse Neuron Instead", rewardCleanseRect.x + rewardCleanseRect.width * 0.5, rewardCleanseRect.y + 25, 12, "#ff8e8e", "center");
+        button(world, rewardCleanseRect.x, rewardCleanseRect.y, rewardCleanseRect.width, rewardCleanseRect.height, "Cleanse", { action: "reward_cleanse_start" });
+      }
     }
 
     if (!(drag && drag.sourceKind === "node" && drag.active)) {
@@ -6692,10 +6755,15 @@ function drawOverlay(world, ctx) {
 
   if (phase.name === "reward_target" || phase.name === "shop_target") {
     const pending = ui.pendingUpgrade;
+    const isCleanse = pending && pending.upgrade && pending.upgrade.id === "resetLens";
     drawNodeDragTargets(ctx, layout, network, ui.drag);
-    drawText(ctx, "Select Neuron", layout.width / 2, layout.height * 0.16, 30, COLORS.text, "center");
-    drawText(ctx, pending.upgrade.name, layout.width / 2, layout.height * 0.21, 18, COLORS.energy, "center");
-    drawText(ctx, "Choose the neuron that receives this upgrade.", layout.width / 2, layout.height * 0.25, 15, COLORS.textDim, "center");
+    drawText(ctx, isCleanse ? "Cleanse Neuron" : "Select Neuron", layout.width / 2, layout.height * 0.16, 30, COLORS.text, "center");
+    if (!isCleanse) {
+      drawText(ctx, pending.upgrade.name, layout.width / 2, layout.height * 0.21, 18, COLORS.energy, "center");
+      drawText(ctx, "Choose the neuron that receives this upgrade.", layout.width / 2, layout.height * 0.25, 15, COLORS.textDim, "center");
+    } else {
+      drawText(ctx, "Select a neuron to wipe clean.", layout.width / 2, layout.height * 0.21, 15, "#ff8e8e", "center");
+    }
 
     const layerY = (layer) => networkLayerY(layout, layer);
     const bounds = networkLayerBounds(layout);
@@ -6733,7 +6801,7 @@ function drawOverlay(world, ctx) {
     drawButton(ctx, { x: layout.width / 2 - 78, y: layout.height - 96, width: 156, height: 56 }, true);
     drawText(ctx, "Cancel", layout.width / 2, layout.height - 61, 18, COLORS.text, "center");
     button(world, layout.width / 2 - 78, layout.height - 96, 156, 56, "Cancel", {
-      action: phase.name === "shop_target" ? "cancel_shop_target" : "cancel_reward_target",
+      action: isCleanse ? (pending.source === "camp" ? "cancel_camp_target" : "cancel_reward_target") : (phase.name === "shop_target" ? "cancel_shop_target" : "cancel_reward_target"),
     });
     return;
   }
@@ -6898,40 +6966,43 @@ function drawOverlay(world, ctx) {
   }
 
   if (phase.name === "camp") {
-    const canHeal = run.baseHp < run.maxBaseHp;
-    const healedHp = Math.min(run.maxBaseHp, run.baseHp + 3);
+    const center = layout.width / 2;
+    const height = layout.height;
+    
+    // Vertical layout for robustness
     const panel = {
       x: layout.width * 0.08,
-      y: layout.height * 0.14,
+      y: layout.height * 0.12,
       width: layout.width * 0.84,
-      height: 348,
+      height: 420,
     };
-    const healRect = {
-      x: panel.x + 16,
-      y: panel.y + 126,
-      width: panel.width - 32,
-      height: 92,
-    };
-    const upgradeRect = {
-      x: panel.x + 16,
-      y: panel.y + 230,
-      width: panel.width - 32,
-      height: 92,
-    };
-    ctx.fillStyle = "rgba(18, 23, 31, 0.9)";
+    
+    const cardW = panel.width - 32;
+    const cardH = 86;
+    const gap = 12;
+
+    ctx.fillStyle = "rgba(18, 23, 31, 0.95)";
     pathRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 18);
     ctx.fill();
     ctx.strokeStyle = "rgba(246,248,251,0.12)";
     ctx.lineWidth = 1.2;
     pathRoundedRect(ctx, panel.x, panel.y, panel.width, panel.height, 18);
     ctx.stroke();
-    drawText(ctx, "Camp", layout.width / 2, panel.y + 34, 30, COLORS.text, "center");
-    drawText(ctx, "Choose one benefit before returning to the map.", layout.width / 2, panel.y + 64, 16, COLORS.textDim, "center");
+
+    drawText(ctx, "Rest at Camp", center, panel.y + 34, 28, COLORS.text, "center");
+    drawText(ctx, "Prepare for the journey ahead", center, panel.y + 58, 15, COLORS.textDim, "center");
+
+    const healRect = { x: panel.x + 16, y: panel.y + 90, width: cardW, height: cardH };
+    const upgradeRect = { x: panel.x + 16, y: healRect.y + cardH + gap, width: cardW, height: cardH };
+    const cleanseRect = { x: panel.x + 16, y: upgradeRect.y + cardH + gap, width: cardW, height: cardH };
+
+    const canHeal = run.baseHp < run.maxBaseHp;
+    const healedHp = Math.min(run.maxBaseHp, run.baseHp + 3);
 
     drawCampChoicePanel(ctx, healRect, {
-      title: "Heal Base",
-      subtitle: canHeal ? `${run.baseHp}/${run.maxBaseHp} -> ${healedHp}/${run.maxBaseHp}` : "Base already full",
-      detail: canHeal ? "Restore structural integrity and keep the current route alive longer." : "Healing is unavailable because the base is already at maximum HP.",
+      title: "Repair Base",
+      subtitle: canHeal ? `${run.baseHp} -> ${healedHp} HP` : "Full Health",
+      detail: "Mend core structure and restore 3 points of integrity.",
       accent: COLORS.warning,
       icon: "heal",
       active: canHeal,
@@ -6941,19 +7012,30 @@ function drawOverlay(world, ctx) {
     }
 
     drawCampChoicePanel(ctx, upgradeRect, {
-      title: "Upgrade Neuron",
-      subtitle: "Choose one node to empower",
-      detail: "Select any neuron in the lattice and permanently strengthen its white route damage.",
+      title: "Empower Node",
+      subtitle: "Power +1",
+      detail: "Permanently increase a neuron base output signal.",
       accent: COLORS.energy,
       icon: "upgrade",
       active: true,
     });
     button(world, upgradeRect.x, upgradeRect.y, upgradeRect.width, upgradeRect.height, "Upgrade", { action: "camp_upgrade" });
+
+    drawCampChoicePanel(ctx, cleanseRect, {
+      title: "Cleanse Neuron",
+      subtitle: "Full Reset",
+      detail: "Wipe all upgrades and links from a neuron completely.",
+      accent: "#ff8e8e",
+      icon: "resetLens",
+      active: true,
+    });
+    button(world, cleanseRect.x, cleanseRect.y, cleanseRect.width, cleanseRect.height, "Cleanse", { action: "camp_cleanse" });
     return;
   }
 
-  if (phase.name === "camp_target") {
+  if (phase.name === "camp_target" || phase.name === "camp_cleanse") {
     const { headerRect, cancelRect } = campTargetLayout(layout);
+    const isCleanse = phase.name === "camp_cleanse";
 
     ctx.fillStyle = "rgba(16, 20, 26, 0.08)";
     ctx.fillRect(0, 0, layout.width, layout.height);
@@ -6968,17 +7050,17 @@ function drawOverlay(world, ctx) {
     ctx.stroke();
     drawPillButton(ctx, cancelRect, true);
     drawText(ctx, "Cancel", cancelRect.x + cancelRect.width * 0.5, cancelRect.y + 25, 15, COLORS.text, "center");
-    button(world, cancelRect.x, cancelRect.y, cancelRect.width, cancelRect.height, "Cancel", { action: "cancel_camp_target" });
+    button(world, cancelRect.x, cancelRect.y, cancelRect.width, cancelRect.height, "Cancel", { action: isCleanse ? "cancel_camp_cleanse" : "cancel_camp_target" });
 
-    drawText(ctx, "Empower Neuron", layout.width * 0.5, headerRect.y + 74, 28, COLORS.text, "center");
-    drawText(ctx, "Choose one neuron to empower.", layout.width * 0.5, headerRect.y + 98, 15, COLORS.textDim, "center");
+    drawText(ctx, isCleanse ? "Cleanse Neuron" : "Empower Neuron", layout.width * 0.5, headerRect.y + 74, 28, isCleanse ? "#ff8e8e" : COLORS.text, "center");
+    drawText(ctx, isCleanse ? "Select a neuron to wipe clean." : "Select a neuron to empower.", layout.width * 0.5, headerRect.y + 98, 15, COLORS.textDim, "center");
 
     for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
       for (let lane = 0; lane < LANE_COUNT; lane += 1) {
         const target = { layer, lane };
         const x = laneCenterX(layout, lane);
         const y = networkLayerY(layout, layer);
-        ctx.strokeStyle = "rgba(89,245,214,0.18)";
+        ctx.strokeStyle = isCleanse ? "rgba(255, 142, 142, 0.24)" : "rgba(89,245,214,0.18)";
         ctx.lineWidth = 1.1;
         ctx.beginPath();
         ctx.arc(x, y, layout.cell * 1.08, 0, Math.PI * 2);

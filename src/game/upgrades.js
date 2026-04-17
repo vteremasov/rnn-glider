@@ -41,6 +41,7 @@ export const UPGRADE_LIBRARY = [
   { id: "rightLink", name: "Right Link", short: "+~85% right branch", description: "Adds a strong branch: about 85% extra signal into the right neuron of the next layer.", category: "topology", rewardWeight: 0.9, color: "#ffb37f", icon: "R", shape: "triangle" },
   { id: "divider", name: "Divider", short: "split sideways", description: "Copies charge sideways into left and right neighbors.", category: "topology", rewardWeight: 0.8, color: "#ffd67f", icon: "D", shape: "triangle" },
   { id: "merger", name: "Merger", short: "pull sideways", description: "Pulls charge from left and right neighbors into this neuron.", category: "topology", rewardWeight: 0.8, color: "#ffe7aa", icon: "M", shape: "triangle" },
+  { id: "resetLens", name: "Reset Lens", short: "cleanse", description: "Internal use only.", category: "utility", rewardWeight: 0, color: "#ffffff", icon: "C", shape: "circle" },
 ];
 
 const UPGRADE_INDEX = Object.fromEntries(UPGRADE_LIBRARY.map((upgrade) => [upgrade.id, upgrade]));
@@ -126,12 +127,18 @@ export function applyUpgrade(state, upgrade, target) {
 
   if (upgrade.id === "resetLens") {
     node.power = 0;
+    // Clear all effects
     for (const effectKey of Object.keys(node.effects)) {
       node.effects[effectKey] = 0;
     }
+    // Clear all status accumulations if any
+    node.effects = {};
+    // Clear all links
     for (const linkKey of Object.keys(node.links)) {
       node.links[linkKey] = 0;
     }
+    node.links = { left: 0, right: 0, divider: 0, merger: 0, relay: 0 };
+    
     node.appearance = null;
     node.durability = null;
     node.isBroken = false;
