@@ -1395,15 +1395,19 @@ function completeMapRoom(world) {
   const run = world.resources.run;
   const network = world.resources.network;
   
-  // Temporal Upgrades: Reduce durability
-  for (let layer = 0; layer < NETWORK_LAYERS; layer++) {
-    for (let lane = 0; lane < LANE_COUNT; lane++) {
-      const node = network.nodes[layer][lane];
-      if (node.durability !== null && typeof node.durability === "number") {
-        node.durability -= 1;
-        if (node.durability <= 0) {
-          node.durability = 0;
-          node.isBroken = true;
+  // Temporal Upgrades: Reduce durability ONLY in combat-related rooms
+  const isCombatRoom = run.currentRoomType === "combat" || run.currentRoomType === "elite" || run.currentRoomType === "boss";
+  
+  if (isCombatRoom) {
+    for (let layer = 0; layer < NETWORK_LAYERS; layer++) {
+      for (let lane = 0; lane < LANE_COUNT; lane++) {
+        const node = network.nodes[layer][lane];
+        if (node.durability !== null && typeof node.durability === "number") {
+          node.durability -= 1;
+          if (node.durability <= 0) {
+            node.durability = 0;
+            node.isBroken = true;
+          }
         }
       }
     }
