@@ -121,6 +121,7 @@ export function createShard(world, lane, x, y, drift, payload) {
     slow: payload.slow,
     freeze: payload.freeze,
     pushback: payload.pushback * 0.7,
+    corruption: payload.corruption || 0,
     hitIds: [],
   });
   return entity;

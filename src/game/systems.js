@@ -2357,8 +2357,31 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
   }
 
   if (projectile.split > 0) {
-    createShard(world, enemy.lane, contactX, contactY, -0.22, projectile);
-    createShard(world, enemy.lane, contactX, contactY, 0.22, projectile);
+    // Find nearby targets for split shards
+    const candidates = [];
+    for (const id of world.query("enemy")) {
+      if (id === enemyId) continue;
+      const candidate = world.getComponent(id, "enemy");
+      if (!candidate || candidate.hp <= 0 || candidate.isAlly) continue;
+      
+      const candX = enemyScreenX(layout, candidate);
+      const dist = Math.hypot(candX - contactX, candidate.y - contactY);
+      if (dist < 300) { // Max search radius for split
+        candidates.push({ id, dist });
+      }
+    }
+    candidates.sort((a, b) => a.dist - b.dist);
+
+    const shardCount = Math.floor(1 + projectile.split);
+    for (let i = 0; i < shardCount; i++) {
+      const target = candidates[i];
+      const drift = i % 2 === 0 ? -0.22 : 0.22;
+      const shard = createShard(world, enemy.lane, contactX, contactY, drift, projectile);
+      if (target) {
+        const shardComp = world.getComponent(shard, "projectile");
+        if (shardComp) shardComp.targetId = target.id;
+      }
+    }
   }
 
   if (projectile.ricochet > 0) {
@@ -3340,6 +3363,12 @@ export function towerFireSystem(world, delta) {
   for (let layer = 0; layer < NETWORK_LAYERS; layer += 1) {
     const lane = layer === 0 ? sourceLane : shot.lane;
     const node = network.nodes[layer][lane];
+    
+    // Skip gathering positive effects from broken nodes
+    if (node.isBroken) {
+      continue;
+    }
+
     for (const key of Object.keys(node.effects)) {
       combinedEffects[key] = (combinedEffects[key] || 0) + (node.effects[key] || 0);
     }
@@ -3356,7 +3385,7 @@ export function towerFireSystem(world, delta) {
   createProjectile(world, shot.lane, muzzle.x, muzzle.y, bestTarget.entity, {
     damage,
     pierce: combinedEffects.penetration || 0,
-    split: combinedEffects.split || 0,
+    split: (combinedEffects.split || 0) + (combinedEffects.unstable_prism || 0),
     ricochet: combinedEffects.ricochet || 0,
     burn: (combinedEffects.fire || 0) * 2.4 * statusScale,
     curse: (combinedEffects.curse || 0) * 1.8 * statusScale,
