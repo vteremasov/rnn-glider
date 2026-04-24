@@ -2359,6 +2359,7 @@ function applyHit(world, enemyId, projectile, contactX, contactY) {
   if (projectile.split > 0) {
     // Find nearby targets for split shards
     const candidates = [];
+    const layout = world.resources.layout;
     for (const id of world.query("enemy")) {
       if (id === enemyId) continue;
       const candidate = world.getComponent(id, "enemy");
