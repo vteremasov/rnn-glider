@@ -2100,12 +2100,12 @@ function openCampEmpower(world) {
   });
 }
 
-function openCampCleanse(world) {
+function openCampCleanse(world, source = "camp") {
   const resetLens = UPGRADE_LIBRARY.find(u => u.id === "resetLens");
   if (!resetLens) return;
   
   openReward(world, {
-    source: "camp",
+    source: source,
     rewards: [resetLens],
   });
 }
@@ -3083,24 +3083,8 @@ export function inputSystem(world) {
       return;
     }
     if (hit.action === "reward_cleanse_start") {
-      openCampCleanse(world);
+      openCampCleanse(world, "reward");
       return;
-    }
-    return;
-  }
-
-  if (phase.name === "reward_cleanse") {
-    if (hit.action === "cancel_reward_cleanse") {
-      world.resources.phase.name = "reward_drag";
-      return;
-    }
-    if (hit.target) {
-      const resetLens = UPGRADE_LIBRARY.find(u => u.id === "resetLens");
-      if (resetLens) {
-        applyUpgrade(world.resources.network, resetLens, hit.target);
-        createFlash(world, laneCenterX(world.resources.layout, hit.target.lane), networkLayerY(world.resources.layout, hit.target.layer), "#ff4d4d", 60);
-      }
-      completeMapRoom(world);
     }
     return;
   }
